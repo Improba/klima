@@ -25,6 +25,135 @@ interface Particle {
   maxAge: number
 }
 
+interface WindGrid {
+  data: Map<string, WindFieldSample>
+  minX: number
+  maxX: number
+  minY: number
+  maxY: number
+  minZ: number
+  maxZ: number
+  stepX: number
+  stepY: number
+  stepZ: number
+}
+
+function buildWindGrid(windField: WindFieldSample[]): WindGrid {
+  if (windField.length === 0) {
+    return {
+      data: new Map(),
+      minX: 0, maxX: 0,
+      minY: 0, maxY: 0,
+      minZ: 0, maxZ: 0,
+      stepX: 1, stepY: 1, stepZ: 1,
+    }
+  }
+
+  let minX = Infinity, maxX = -Infinity
+  let minY = Infinity, maxY = -Infinity
+  let minZ = Infinity, maxZ = -Infinity
+
+  for (const s of windField) {
+    if (s.x < minX) minX = s.x
+    if (s.x > maxX) maxX = s.x
+    if (s.y < minY) minY = s.y
+    if (s.y > maxY) maxY = s.y
+    if (s.z < minZ) minZ = s.z
+    if (s.z > maxZ) maxZ = s.z
+  }
+
+  const xVals = new Set<number>()
+  const yVals = new Set<number>()
+  const zVals = new Set<number>()
+  for (const s of windField) {
+    xVals.add(s.x)
+    yVals.add(s.y)
+    zVals.add(s.z)
+  }
+
+  const sortedX = [...xVals].sort((a, b) => a - b)
+  const sortedY = [...yVals].sort((a, b) => a - b)
+  const sortedZ = [...zVals].sort((a, b) => a - b)
+
+  const stepX = sortedX.length > 1 ? sortedX[1] - sortedX[0] : 1
+  const stepY = sortedY.length > 1 ? sortedY[1] - sortedY[0] : 1
+  const stepZ = sortedZ.length > 1 ? sortedZ[1] - sortedZ[0] : 1
+
+  const data = new Map<string, WindFieldSample>()
+  for (const s of windField) {
+    const key = `${s.x},${s.y},${s.z}`
+    data.set(key, s)
+  }
+
+  return { data, minX, maxX, minY, maxY, minZ, maxZ, stepX, stepY, stepZ }
+}
+
+function gridKey(x: number, y: number, z: number): string {
+  return `${x},${y},${z}`
+}
+
+function interpolateWindFast(
+  gx: number,
+  gy: number,
+  gz: number,
+  grid: WindGrid,
+): [number, number, number] {
+  if (grid.data.size === 0) return [0, 0, 0]
+
+  const sx = grid.stepX
+  const sy = grid.stepY
+  const sz = grid.stepZ
+
+  const ix = Math.floor((gx - grid.minX) / sx)
+  const iy = Math.floor((gy - grid.minY) / sy)
+  const iz = Math.floor((gz - grid.minZ) / sz)
+
+  const x0 = grid.minX + ix * sx
+  const y0 = grid.minY + iy * sy
+  const z0 = grid.minZ + iz * sz
+
+  const x1 = x0 + sx
+  const y1 = y0 + sy
+  const z1 = z0 + sz
+
+  const fx = sx > 0 ? Math.max(0, Math.min(1, (gx - x0) / sx)) : 0
+  const fy = sy > 0 ? Math.max(0, Math.min(1, (gy - y0) / sy)) : 0
+  const fz = sz > 0 ? Math.max(0, Math.min(1, (gz - z0) / sz)) : 0
+
+  let totalWeight = 0
+  let wx = 0, wy = 0, wz = 0
+
+  const corners: [number, number, number, number][] = [
+    [x0, y0, z0, (1 - fx) * (1 - fy) * (1 - fz)],
+    [x1, y0, z0, fx * (1 - fy) * (1 - fz)],
+    [x0, y1, z0, (1 - fx) * fy * (1 - fz)],
+    [x1, y1, z0, fx * fy * (1 - fz)],
+    [x0, y0, z1, (1 - fx) * (1 - fy) * fz],
+    [x1, y0, z1, fx * (1 - fy) * fz],
+    [x0, y1, z1, (1 - fx) * fy * fz],
+    [x1, y1, z1, fx * fy * fz],
+  ]
+
+  for (const [cx, cy, cz, w] of corners) {
+    if (w < 1e-10) continue
+    const sample = grid.data.get(gridKey(cx, cy, cz))
+    if (sample) {
+      wx += sample.vx * w
+      wy += sample.vy * w
+      wz += sample.vz * w
+      totalWeight += w
+    }
+  }
+
+  if (totalWeight === 0) {
+    const nearest = grid.data.get(gridKey(x0, y0, z0))
+    if (nearest) return [nearest.vx, nearest.vy, nearest.vz]
+    return [0, 0, 0]
+  }
+
+  return [wx / totalWeight, wy / totalWeight, wz / totalWeight]
+}
+
 const PARTICLE_COUNT = 800
 const BASE_MAX_AGE = 120
 const SPEED_SCALE = 0.00001
@@ -33,39 +162,6 @@ export function useWindParticles() {
   let animationFrame: number | null = null
   let particles: Particle[] = []
   let pointCollection: PointPrimitiveCollection | null = null
-
-  function interpolateWind(
-    x: number,
-    y: number,
-    z: number,
-    windField: WindFieldSample[],
-  ): [number, number, number] {
-    if (windField.length === 0) return [0, 0, 0]
-
-    let totalWeight = 0
-    let wx = 0
-    let wy = 0
-    let wz = 0
-
-    const k = Math.min(windField.length, 4)
-    const sorted = windField
-      .map((s) => ({
-        sample: s,
-        dist: Math.sqrt((s.x - x) ** 2 + (s.y - y) ** 2 + (s.z - z) ** 2),
-      }))
-      .sort((a, b) => a.dist - b.dist)
-      .slice(0, k)
-
-    for (const { sample, dist } of sorted) {
-      const w = 1 / (dist + 0.0001)
-      wx += sample.vx * w
-      wy += sample.vy * w
-      wz += sample.vz * w
-      totalWeight += w
-    }
-
-    return [wx / totalWeight, wy / totalWeight, wz / totalWeight]
-  }
 
   function spawnParticle(windField: WindFieldSample[]): Particle {
     const sample = windField[Math.floor(Math.random() * windField.length)]
@@ -83,10 +179,19 @@ export function useWindParticles() {
     }
   }
 
+  function geoToGrid(lonDeg: number, latDeg: number): { gx: number; gy: number } {
+    return {
+      gx: (lonDeg - ORIGIN_LON) / CELL_SIZE_DEG,
+      gy: (latDeg - ORIGIN_LAT) / CELL_SIZE_DEG,
+    }
+  }
+
   function startAnimation(viewer: Viewer, windField: WindFieldSample[]) {
     stopAnimation(viewer)
 
     if (windField.length === 0) return
+
+    const grid = buildWindGrid(windField)
 
     pointCollection = new PointPrimitiveCollection()
     viewer.scene.primitives.add(pointCollection)
@@ -105,6 +210,8 @@ export function useWindParticles() {
     function animate() {
       if (!pointCollection) return
 
+      const ellipsoid = viewer.scene.globe.ellipsoid
+
       for (let i = 0; i < particles.length; i++) {
         const p = particles[i]
         p.age++
@@ -118,13 +225,15 @@ export function useWindParticles() {
           continue
         }
 
-        const ellipsoid = viewer.scene.globe.ellipsoid
         const cartographic = ellipsoid.cartesianToCartographic(p.position)
         const lonDeg = CesiumMath.toDegrees(cartographic.longitude)
         const latDeg = CesiumMath.toDegrees(cartographic.latitude)
         const alt = cartographic.height
 
-        const [vx, vy, vz] = interpolateWind(lonDeg, latDeg, alt, windField)
+        const { gx, gy } = geoToGrid(lonDeg, latDeg)
+        const gz = alt / 2
+
+        const [vx, vy, vz] = interpolateWindFast(gx, gy, gz, grid)
         p.velocity = [vx, vy, vz]
 
         const newLon = lonDeg + vx * SPEED_SCALE
@@ -166,6 +275,5 @@ export function useWindParticles() {
   return {
     startAnimation,
     stopAnimation,
-    interpolateWind,
   }
 }

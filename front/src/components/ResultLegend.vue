@@ -61,7 +61,7 @@ const inferenceTime = computed(() => props.result?.metadata.inference_time_ms ??
 <style scoped>
 .result-legend {
   position: absolute;
-  bottom: 80px;
+  top: 16px;
   left: 16px;
   z-index: 10;
   background: rgba(30, 30, 30, 0.92);

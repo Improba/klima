@@ -25,6 +25,12 @@ const props = defineProps<{
   windDirection: number
   sunElevation: number
   simulationResult?: SimulationResult | null
+  activeTool: string
+  activeSurfaceType: string
+}>()
+
+const emit = defineEmits<{
+  'map-click': [payload: { lon: number; lat: number; alt: number }]
 }>()
 
 const cesiumContainer = ref<HTMLElement>()
@@ -80,19 +86,17 @@ function setupClickHandler() {
   handler = new ScreenSpaceEventHandler(viewer.scene.canvas)
   handler.setInputAction((event: { position: Cartesian2 }) => {
     if (!viewer) return
-    const picked = viewer.scene.pick(event.position)
-    if (defined(picked)) {
-      console.log('Picked entity:', picked)
-    }
 
     const cartesian = viewer.scene.pickPosition(event.position)
     if (defined(cartesian)) {
       const cartographic = viewer.scene.globe.ellipsoid.cartesianToCartographic(cartesian)
-      console.log(
-        'Clicked:',
-        CesiumMath.toDegrees(cartographic.longitude).toFixed(6),
-        CesiumMath.toDegrees(cartographic.latitude).toFixed(6),
-      )
+      const lon = CesiumMath.toDegrees(cartographic.longitude)
+      const lat = CesiumMath.toDegrees(cartographic.latitude)
+      const alt = cartographic.height
+
+      if (props.activeTool === 'brush') {
+        emit('map-click', { lon, lat, alt })
+      }
     }
   }, ScreenSpaceEventType.LEFT_CLICK)
 }
@@ -118,6 +122,12 @@ watch(
     }
   },
 )
+
+function getViewer(): Viewer | null {
+  return viewer
+}
+
+defineExpose({ getViewer })
 
 onBeforeUnmount(() => {
   stopAnimation(viewer ?? undefined)

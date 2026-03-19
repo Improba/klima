@@ -1,5 +1,5 @@
 <template>
-  <q-page class="q-pa-lg">
+  <q-page class="q-pa-lg" style="overflow-y: auto;">
     <div class="row items-center q-mb-lg">
       <div class="text-h4 text-white text-weight-bold">Projets</div>
       <q-space />
@@ -32,7 +32,7 @@
         class="col-12 col-sm-6 col-md-4 col-lg-3"
       >
         <q-card
-          class="bg-grey-10 cursor-pointer full-height"
+          class="bg-grey-10 cursor-pointer full-height project-card"
           @click="$router.push(`/projects/${project.id}`)"
         >
           <q-card-section>
@@ -107,3 +107,13 @@ function confirmDelete(project: Project) {
   })
 }
 </script>
+
+<style scoped lang="scss">
+.project-card {
+  transition: transform 0.2s, box-shadow 0.2s;
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(0, 188, 212, 0.15);
+  }
+}
+</style>

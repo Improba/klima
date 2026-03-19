@@ -2,9 +2,8 @@ import {
   Viewer,
   Color,
   Entity,
-  Cartesian3,
   Rectangle,
-  Math as CesiumMath,
+  ImageMaterialProperty,
 } from 'cesium'
 import type { SurfaceTemperature } from 'src/types'
 
@@ -56,34 +55,64 @@ export function useThermalOverlay() {
 
   function applyOverlay(viewer: Viewer, temperatures: SurfaceTemperature[]) {
     clearOverlay(viewer)
-
     if (temperatures.length === 0) return
 
     let min = Infinity
     let max = -Infinity
+    let minGridX = Infinity
+    let maxGridX = -Infinity
+    let minGridY = Infinity
+    let maxGridY = -Infinity
+
     for (const t of temperatures) {
       if (t.temperature < min) min = t.temperature
       if (t.temperature > max) max = t.temperature
+      if (t.lon < minGridX) minGridX = t.lon
+      if (t.lon > maxGridX) maxGridX = t.lon
+      if (t.lat < minGridY) minGridY = t.lat
+      if (t.lat > maxGridY) maxGridY = t.lat
     }
 
-    for (const sample of temperatures) {
-      const color = temperatureToColor(sample.temperature, min, max)
-      const geo = gridToGeo(sample.lon, sample.lat)
-      const west = CesiumMath.toRadians(geo.lon - CELL_SIZE_DEG)
-      const south = CesiumMath.toRadians(geo.lat - CELL_SIZE_DEG)
-      const east = CesiumMath.toRadians(geo.lon + CELL_SIZE_DEG)
-      const north = CesiumMath.toRadians(geo.lat + CELL_SIZE_DEG)
+    const width = maxGridX - minGridX + 1
+    const height = maxGridY - minGridY + 1
 
-      const entity = viewer.entities.add({
-        rectangle: {
-          coordinates: new Rectangle(west, south, east, north),
-          material: color,
-          height: sample.alt,
-          classificationType: undefined,
-        },
-      })
-      entities.push(entity)
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')!
+
+    ctx.clearRect(0, 0, width, height)
+
+    for (const t of temperatures) {
+      const color = temperatureToColor(t.temperature, min, max)
+      const r = Math.round(color.red * 255)
+      const g = Math.round(color.green * 255)
+      const b = Math.round(color.blue * 255)
+      ctx.fillStyle = `rgba(${r},${g},${b},0.7)`
+      const px = t.lon - minGridX
+      const py = maxGridY - t.lat // flip Y so north is up
+      ctx.fillRect(px, py, 1, 1)
     }
+
+    const westGeo = gridToGeo(minGridX, minGridY)
+    const eastGeo = gridToGeo(maxGridX + 1, maxGridY + 1)
+
+    const entity = viewer.entities.add({
+      rectangle: {
+        coordinates: Rectangle.fromDegrees(
+          westGeo.lon - CELL_SIZE_DEG / 2,
+          westGeo.lat - CELL_SIZE_DEG / 2,
+          eastGeo.lon + CELL_SIZE_DEG / 2,
+          eastGeo.lat + CELL_SIZE_DEG / 2,
+        ),
+        material: new ImageMaterialProperty({
+          image: canvas,
+          transparent: true,
+        }),
+        height: 0,
+      },
+    })
+    entities.push(entity)
   }
 
   function clearOverlay(viewer: Viewer) {

@@ -20,7 +20,7 @@
     </q-header>
 
     <q-drawer v-model="leftDrawerOpen" show-if-above bordered class="bg-grey-10">
-      <q-list>
+      <q-list v-if="isProjectPage">
         <q-item-label header class="text-white text-weight-bold q-pt-lg">
           Paramètres de simulation
         </q-item-label>
@@ -102,6 +102,18 @@
             <div class="text-caption text-grey-5">
               Dernière inférence :
               {{ simStore.lastResult.metadata.inference_time_ms }} ms
+            </div>
+          </q-item-section>
+        </q-item>
+      </q-list>
+      <q-list v-else>
+        <q-item-label header class="text-white text-weight-bold q-pt-lg">
+          Klima
+        </q-item-label>
+        <q-item class="q-px-md">
+          <q-item-section>
+            <div class="text-body2 text-grey-4">
+              Sélectionnez un projet pour commencer la simulation.
             </div>
           </q-item-section>
         </q-item>
