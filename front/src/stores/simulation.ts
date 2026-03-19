@@ -6,6 +6,7 @@ import { useApi } from 'src/composables/useApi'
 export const useSimulationStore = defineStore('simulation', () => {
   const lastResult = ref<SimulationResult | null>(null)
   const isSimulating = ref(false)
+  const geometry = ref<GeometryBlock[]>([])
   const params = ref({
     windSpeed: 5,
     windDirection: 180,
@@ -15,7 +16,7 @@ export const useSimulationStore = defineStore('simulation', () => {
 
   const api = useApi()
 
-  async function runSimulation(geometry: GeometryBlock[] = [], projectId?: string, scenarioId?: string) {
+  async function runSimulation(projectId?: string, scenarioId?: string) {
     isSimulating.value = true
     try {
       const res = await api.simulate({
@@ -23,11 +24,11 @@ export const useSimulationStore = defineStore('simulation', () => {
         wind_direction: params.value.windDirection,
         sun_elevation: params.value.sunElevation,
         t_ambient: params.value.tAmbient,
-        geometry,
+        geometry: geometry.value,
         project_id: projectId,
         scenario_id: scenarioId,
       })
-      lastResult.value = res.result
+      lastResult.value = res
       return res
     } finally {
       isSimulating.value = false
@@ -41,6 +42,7 @@ export const useSimulationStore = defineStore('simulation', () => {
   return {
     lastResult,
     isSimulating,
+    geometry,
     params,
     runSimulation,
     clearResult,

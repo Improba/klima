@@ -7,19 +7,30 @@
       :sun-elevation="simStore.params.sunElevation"
       :simulation-result="simStore.lastResult"
     />
+    <EditorToolbar
+      @tool-change="surfaceEditor.activeTool.value = $event"
+      @surface-type-change="surfaceEditor.activeSurfaceType.value = $event"
+    />
+    <TimeSlider @update:sun-elevation="simStore.params.sunElevation = $event" />
+    <ResultLegend :result="simStore.lastResult" />
   </q-page>
 </template>
 
 <script setup lang="ts">
 import { onMounted, watch } from 'vue'
 import CesiumViewer from 'components/CesiumViewer.vue'
+import EditorToolbar from 'components/EditorToolbar.vue'
+import TimeSlider from 'components/TimeSlider.vue'
+import ResultLegend from 'components/ResultLegend.vue'
 import { useProjectStore } from 'src/stores/project'
 import { useSimulationStore } from 'src/stores/simulation'
+import { useSurfaceEditor } from 'src/composables/useSurfaceEditor'
 
 const props = defineProps<{ id: string }>()
 
 const projectStore = useProjectStore()
 const simStore = useSimulationStore()
+const surfaceEditor = useSurfaceEditor()
 
 onMounted(() => {
   projectStore.fetchProject(props.id)

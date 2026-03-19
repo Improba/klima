@@ -4,7 +4,7 @@ import type {
   Scenario,
   GeometryDiff,
   SimulateRequest,
-  SimulateResponse,
+  SimulationResult,
   Simulation,
 } from 'src/types'
 
@@ -81,8 +81,8 @@ export function useApi() {
     return request<void>(`/scenarios/${id}`, { method: 'DELETE' })
   }
 
-  async function simulate(req: SimulateRequest): Promise<SimulateResponse> {
-    return request<SimulateResponse>('/simulate', {
+  async function simulate(req: SimulateRequest): Promise<SimulationResult> {
+    return request<SimulationResult>('/simulate', {
       method: 'POST',
       body: JSON.stringify(req),
     })

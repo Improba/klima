@@ -8,7 +8,16 @@ import {
 } from 'cesium'
 import type { SurfaceTemperature } from 'src/types'
 
-const CELL_SIZE_DEG = 0.00005
+const ORIGIN_LON = 2.3400
+const ORIGIN_LAT = 48.8500
+const CELL_SIZE_DEG = 0.00002 // ~2m at Paris latitude
+
+function gridToGeo(gridX: number, gridY: number): { lon: number; lat: number } {
+  return {
+    lon: ORIGIN_LON + gridX * CELL_SIZE_DEG,
+    lat: ORIGIN_LAT + gridY * CELL_SIZE_DEG,
+  }
+}
 
 export function useThermalOverlay() {
   let entities: Entity[] = []
@@ -59,10 +68,11 @@ export function useThermalOverlay() {
 
     for (const sample of temperatures) {
       const color = temperatureToColor(sample.temperature, min, max)
-      const west = CesiumMath.toRadians(sample.lon - CELL_SIZE_DEG)
-      const south = CesiumMath.toRadians(sample.lat - CELL_SIZE_DEG)
-      const east = CesiumMath.toRadians(sample.lon + CELL_SIZE_DEG)
-      const north = CesiumMath.toRadians(sample.lat + CELL_SIZE_DEG)
+      const geo = gridToGeo(sample.lon, sample.lat)
+      const west = CesiumMath.toRadians(geo.lon - CELL_SIZE_DEG)
+      const south = CesiumMath.toRadians(geo.lat - CELL_SIZE_DEG)
+      const east = CesiumMath.toRadians(geo.lon + CELL_SIZE_DEG)
+      const north = CesiumMath.toRadians(geo.lat + CELL_SIZE_DEG)
 
       const entity = viewer.entities.add({
         rectangle: {

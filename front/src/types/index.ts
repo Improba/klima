@@ -56,18 +56,16 @@ export interface SimulationResult {
   surface_temperatures: SurfaceTemperature[]
   wind_field: WindFieldSample[]
   metadata: {
+    grid_resolution: [number, number, number]
+    wind_subsample: [number, number, number]
+    num_surface_points: number
+    num_wind_samples: number
     inference_time_ms: number
     model_loaded: boolean
     t_ambient: number
     delta_t_range: [number, number]
     wind_speed_range: [number, number]
   }
-}
-
-export interface SimulateResponse {
-  id: string
-  status: string
-  result: SimulationResult
 }
 
 export interface Simulation {

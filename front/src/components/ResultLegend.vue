@@ -27,13 +27,15 @@ const props = defineProps<{
 }>()
 
 const minTemp = computed(() => {
-  if (!props.result || props.result.surface_temperatures.length === 0) return 0
-  return Math.min(...props.result.surface_temperatures.map((t) => t.temperature))
+  if (!props.result) return 0
+  const range = props.result.metadata.delta_t_range
+  return props.result.metadata.t_ambient + range[0]
 })
 
 const maxTemp = computed(() => {
-  if (!props.result || props.result.surface_temperatures.length === 0) return 0
-  return Math.max(...props.result.surface_temperatures.map((t) => t.temperature))
+  if (!props.result) return 0
+  const range = props.result.metadata.delta_t_range
+  return props.result.metadata.t_ambient + range[1]
 })
 
 const avgTemp = computed(() => {
@@ -42,15 +44,15 @@ const avgTemp = computed(() => {
   return sum / props.result.surface_temperatures.length
 })
 
-const deltaT = computed(() => maxTemp.value - minTemp.value)
+const deltaT = computed(() => {
+  if (!props.result) return 0
+  const range = props.result.metadata.delta_t_range
+  return range[1] - range[0]
+})
 
 const maxWind = computed(() => {
-  if (!props.result || props.result.wind_field.length === 0) return 0
-  return Math.max(
-    ...props.result.wind_field.map((w) =>
-      Math.sqrt(w.vx * w.vx + w.vy * w.vy + w.vz * w.vz),
-    ),
-  )
+  if (!props.result) return 0
+  return props.result.metadata.wind_speed_range[1]
 })
 
 const inferenceTime = computed(() => props.result?.metadata.inference_time_ms ?? null)

@@ -136,7 +136,8 @@ function toggleLeftDrawer() {
 
 async function runSimulation() {
   try {
-    await simStore.runSimulation()
+    const projectId = typeof route.params.id === 'string' ? route.params.id : undefined
+    await simStore.runSimulation(projectId)
   } catch {
     $q.notify({ type: 'negative', message: 'Erreur lors de la simulation' })
   }

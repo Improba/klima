@@ -17,6 +17,8 @@ import {
 } from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import type { SimulationResult } from 'src/types'
+import { useThermalOverlay } from 'src/composables/useThermalOverlay'
+import { useWindParticles } from 'src/composables/useWindParticles'
 
 const props = defineProps<{
   windSpeed: number
@@ -28,6 +30,9 @@ const props = defineProps<{
 const cesiumContainer = ref<HTMLElement>()
 let viewer: Viewer | null = null
 let handler: ScreenSpaceEventHandler | null = null
+
+const { applyOverlay, clearOverlay } = useThermalOverlay()
+const { startAnimation, stopAnimation } = useWindParticles()
 
 onMounted(async () => {
   if (!cesiumContainer.value) return
@@ -100,7 +105,23 @@ watch(
   },
 )
 
+watch(
+  () => props.simulationResult,
+  (result) => {
+    if (!viewer) return
+    if (result) {
+      applyOverlay(viewer, result.surface_temperatures)
+      startAnimation(viewer, result.wind_field)
+    } else {
+      clearOverlay(viewer)
+      stopAnimation(viewer)
+    }
+  },
+)
+
 onBeforeUnmount(() => {
+  stopAnimation(viewer ?? undefined)
+  if (viewer) clearOverlay(viewer)
   handler?.destroy()
   handler = null
   viewer?.destroy()
