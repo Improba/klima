@@ -1,5 +1,5 @@
 import { defineConfig } from '@quasar/app-vite/wrappers'
-import cesium from 'vite-plugin-cesium'
+import { viteStaticCopy } from 'vite-plugin-static-copy'
 
 export default defineConfig(() => {
   return {
@@ -12,7 +12,20 @@ export default defineConfig(() => {
     build: {
       target: { browser: ['es2022', 'firefox115', 'chrome115', 'safari14'] },
       vueRouterMode: 'history',
-      vitePlugins: [cesium()],
+
+      extendViteConf(viteConf) {
+        viteConf.plugins ??= []
+        viteConf.plugins.push(
+          viteStaticCopy({
+            targets: [
+              { src: 'node_modules/cesium/Build/Cesium/Workers', dest: 'cesium' },
+              { src: 'node_modules/cesium/Build/Cesium/ThirdParty', dest: 'cesium' },
+              { src: 'node_modules/cesium/Build/Cesium/Assets', dest: 'cesium' },
+              { src: 'node_modules/cesium/Build/Cesium/Widgets', dest: 'cesium' },
+            ],
+          }),
+        )
+      },
     },
 
     devServer: {

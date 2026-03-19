@@ -7,6 +7,7 @@
       :wind-direction="simStore.params.windDirection"
       :sun-elevation="simStore.params.sunElevation"
       :simulation-result="simStore.lastResult"
+      :geometry="simStore.geometry"
       :active-tool="surfaceEditor.activeTool.value"
       :active-surface-type="surfaceEditor.activeSurfaceType.value"
       @map-click="onMapClick"
@@ -56,7 +57,7 @@ watch(
   () => props.id,
   (newId) => {
     projectStore.fetchProject(newId)
-    simStore.clearResult()
+    simStore.resetForProject()
   },
 )
 
@@ -88,8 +89,10 @@ function downloadCSV() {
 
 <style scoped lang="scss">
 .cesium-page {
+  position: relative;
   padding: 0;
   height: 100%;
+  min-height: 0;
 }
 
 .export-actions {

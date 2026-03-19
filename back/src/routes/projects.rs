@@ -12,13 +12,27 @@ use crate::AppState;
 #[derive(Deserialize)]
 pub struct CreateProjectRequest {
     pub name: String,
+    #[serde(default)]
     pub description: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct UpdateProjectRequest {
     pub name: String,
+    #[serde(default)]
     pub description: Option<String>,
+}
+
+/// Empty or whitespace-only strings are treated as absent (optional field).
+fn normalize_optional_description(description: Option<String>) -> Option<String> {
+    description.and_then(|s| {
+        let t = s.trim();
+        if t.is_empty() {
+            None
+        } else {
+            Some(t.into())
+        }
+    })
 }
 
 #[derive(Deserialize)]
@@ -31,7 +45,9 @@ async fn create_project(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateProjectRequest>,
 ) -> Result<Json<db::Project>, AppError> {
-    let project = db::create_project(&state.pool, &body.name, body.description.as_deref()).await?;
+    let description = normalize_optional_description(body.description);
+    let project =
+        db::create_project(&state.pool, &body.name, description.as_deref()).await?;
     Ok(Json(project))
 }
 
@@ -60,7 +76,8 @@ async fn update_project(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateProjectRequest>,
 ) -> Result<Json<db::Project>, AppError> {
-    db::update_project(&state.pool, id, &body.name, body.description.as_deref())
+    let description = normalize_optional_description(body.description);
+    db::update_project(&state.pool, id, &body.name, description.as_deref())
         .await?
         .map(Json)
         .ok_or_else(|| AppError::NotFound(format!("Project {} not found", id)))

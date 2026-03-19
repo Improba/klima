@@ -6,17 +6,10 @@ import {
   ImageMaterialProperty,
 } from 'cesium'
 import type { SurfaceTemperature } from 'src/types'
+import { gridToGeo, OVERLAY_CELL_DEG as CELL_SIZE_DEG } from 'src/utils/overlayGrid'
 
-const ORIGIN_LON = 2.3400
-const ORIGIN_LAT = 48.8500
-const CELL_SIZE_DEG = 0.00002 // ~2m at Paris latitude
-
-function gridToGeo(gridX: number, gridY: number): { lon: number; lat: number } {
-  return {
-    lon: ORIGIN_LON + gridX * CELL_SIZE_DEG,
-    lat: ORIGIN_LAT + gridY * CELL_SIZE_DEG,
-  }
-}
+/** One grid cell is tiny from the default camera; expand so the heatmap stays visible. */
+const MIN_RECT_SPAN_DEG = 0.004 // ~350–450 m near Paris
 
 export function useThermalOverlay() {
   let entities: Entity[] = []
@@ -97,14 +90,27 @@ export function useThermalOverlay() {
     const westGeo = gridToGeo(minGridX, minGridY)
     const eastGeo = gridToGeo(maxGridX + 1, maxGridY + 1)
 
+    let west = westGeo.lon - CELL_SIZE_DEG / 2
+    let south = westGeo.lat - CELL_SIZE_DEG / 2
+    let east = eastGeo.lon + CELL_SIZE_DEG / 2
+    let north = eastGeo.lat + CELL_SIZE_DEG / 2
+
+    const lonSpan = east - west
+    const latSpan = north - south
+    if (lonSpan < MIN_RECT_SPAN_DEG) {
+      const mid = (west + east) / 2
+      west = mid - MIN_RECT_SPAN_DEG / 2
+      east = mid + MIN_RECT_SPAN_DEG / 2
+    }
+    if (latSpan < MIN_RECT_SPAN_DEG) {
+      const mid = (south + north) / 2
+      south = mid - MIN_RECT_SPAN_DEG / 2
+      north = mid + MIN_RECT_SPAN_DEG / 2
+    }
+
     const entity = viewer.entities.add({
       rectangle: {
-        coordinates: Rectangle.fromDegrees(
-          westGeo.lon - CELL_SIZE_DEG / 2,
-          westGeo.lat - CELL_SIZE_DEG / 2,
-          eastGeo.lon + CELL_SIZE_DEG / 2,
-          eastGeo.lat + CELL_SIZE_DEG / 2,
-        ),
+        coordinates: Rectangle.fromDegrees(west, south, east, north),
         material: new ImageMaterialProperty({
           image: canvas,
           transparent: true,

@@ -15,7 +15,7 @@ git clone git@github.com:Improba/klima.git
 cd klima
 
 # Lancer l'environnement de développement
-./scripts/run-dev.sh up
+./scripts/run.sh
 ```
 
 Les services sont ensuite accessibles :
@@ -58,27 +58,28 @@ npm install <package>    # Ajouter un package
 ### Gestion des containers
 
 ```bash
-./scripts/run-dev.sh up       # Démarrer
-./scripts/run-dev.sh down     # Arrêter
-./scripts/run-dev.sh logs     # Voir les logs
-./scripts/run-dev.sh restart  # Redémarrer
+./scripts/run.sh              # Démarrer (mode dev)
+./scripts/run.sh down         # Arrêter
+./scripts/run.sh down -v      # Arrêter et supprimer les volumes nommés
+./scripts/run.sh logs         # Voir les logs
+./scripts/run.sh restart      # Redémarrer
 ```
 
 ## Variables d'environnement
 
 | Variable | Description | Où la définir |
 |----------|-------------|---------------|
-| `CESIUM_ION_TOKEN` | Token Cesium Ion pour les tuiles 3D | `.env` à la racine ou export shell |
+| `CESIUM_ION_TOKEN` | Token Cesium Ion (optionnel) pour les bâtiments 3D Cesium OSM | `.env` à la racine ou export shell |
 | `RUST_LOG` | Niveau de log du backend | docker-compose (par défaut: `debug`) |
 
 ## Configuration Cesium Ion
 
-Pour avoir accès aux bâtiments 3D et au terrain, il faut un token Cesium Ion (gratuit) :
+L’imagery de base vient d’OpenStreetMap (pas besoin de token). Pour activer les **bâtiments 3D** (`createOsmBuildingsAsync`), un token Cesium Ion (gratuit) est nécessaire :
 
 1. Créer un compte sur https://ion.cesium.com
 2. Générer un token d'accès
 3. Le fournir au lancement :
 
 ```bash
-CESIUM_ION_TOKEN=your_token_here ./scripts/run-dev.sh up
+CESIUM_ION_TOKEN=your_token_here ./scripts/run.sh
 ```

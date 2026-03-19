@@ -7,11 +7,12 @@
         :icon="tool.icon"
         :color="activeTool === tool.id ? 'cyan' : 'grey-5'"
         :class="{ 'bg-grey-8': activeTool === tool.id }"
+        :disable="tool.disabled"
         flat
         dense
         @click="selectTool(tool.id)"
       >
-        <q-tooltip>{{ tool.label }}</q-tooltip>
+        <q-tooltip>{{ tool.disabled ? `${tool.label} (bientôt)` : tool.label }}</q-tooltip>
       </q-btn>
     </q-btn-group>
 
@@ -40,6 +41,8 @@ interface ToolDef {
   id: string
   icon: string
   label: string
+  /** Non branché sur la carte — bouton grisé. */
+  disabled?: boolean
 }
 
 const emit = defineEmits<{
@@ -50,8 +53,8 @@ const emit = defineEmits<{
 const tools: ToolDef[] = [
   { id: 'select', icon: 'near_me', label: 'Sélectionner' },
   { id: 'brush', icon: 'format_paint', label: 'Surface' },
-  { id: 'object', icon: 'park', label: 'Objet' },
-  { id: 'eraser', icon: 'delete', label: 'Gomme' },
+  { id: 'object', icon: 'park', label: 'Objet', disabled: true },
+  { id: 'eraser', icon: 'delete', label: 'Gomme', disabled: true },
 ]
 
 const surfaceTypes: { label: string; value: SurfaceType }[] = [
@@ -67,8 +70,8 @@ const activeTool = ref<string>('select')
 const surfaceType = ref<SurfaceType>('herbe')
 
 function selectTool(toolId: string) {
+  if (tools.some((t) => t.id === toolId && t.disabled)) return
   activeTool.value = toolId
-  emit('tool-change', toolId)
 }
 
 function onSurfaceTypeChange(val: SurfaceType) {

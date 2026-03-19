@@ -1,6 +1,12 @@
+@import 'cesium/Build/Cesium/Widgets/widgets.css';
+
 body {
   margin: 0;
   padding: 0;
+}
+
+.cesium-credit-logoContainer {
+  display: none !important;
 }
 
 .cesium-page {

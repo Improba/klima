@@ -23,7 +23,7 @@
 │  training/  →  Python (PyTorch, NVIDIA Modulus, neuraloperator)      │
 │                Local-FNO + PINN  →  export .onnx                    │
 │                                                                     │
-│  scripts/run-dev.sh → lance les containers Docker                    │
+│  scripts/run.sh → lance les containers Docker                        │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -79,7 +79,7 @@ klima/
 │       └── implementation-plan.md
 │
 ├── scripts/
-│   └── run-dev.sh              # Lance l'env de dev Docker
+│   └── run.sh                  # Lance l'env de dev Docker
 │
 ├── .gitignore
 └── README.md

@@ -6,23 +6,23 @@ import {
   Math as CesiumMath,
 } from 'cesium'
 import type { WindFieldSample } from 'src/types'
+import {
+  gridToGeo,
+  OVERLAY_CELL_DEG,
+  OVERLAY_ORIGIN_LAT,
+  OVERLAY_ORIGIN_LON,
+} from 'src/utils/overlayGrid'
 
-const ORIGIN_LON = 2.3400
-const ORIGIN_LAT = 48.8500
-const CELL_SIZE_DEG = 0.00002 // ~2m at Paris latitude
-
-function gridToGeo(gridX: number, gridY: number): { lon: number; lat: number } {
-  return {
-    lon: ORIGIN_LON + gridX * CELL_SIZE_DEG,
-    lat: ORIGIN_LAT + gridY * CELL_SIZE_DEG,
-  }
-}
+/** Altitude d'affichage (m) par couche z du tenseur — le backend envoie des indices, pas des mètres. */
+const ALT_METERS_PER_GRID_Z = 8
 
 interface Particle {
   position: Cartesian3
   velocity: [number, number, number]
   age: number
   maxAge: number
+  /** Indice z du champ vent (comme `WindFieldSample.z`), pour interpoler dans le même espace que l'API. */
+  gridZ: number
 }
 
 interface WindGrid {
@@ -92,6 +92,10 @@ function gridKey(x: number, y: number, z: number): string {
   return `${x},${y},${z}`
 }
 
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, n))
+}
+
 function interpolateWindFast(
   gx: number,
   gy: number,
@@ -104,9 +108,13 @@ function interpolateWindFast(
   const sy = grid.stepY
   const sz = grid.stepZ
 
-  const ix = Math.floor((gx - grid.minX) / sx)
-  const iy = Math.floor((gy - grid.minY) / sy)
-  const iz = Math.floor((gz - grid.minZ) / sz)
+  const ggx = clamp(gx, grid.minX, grid.maxX)
+  const ggy = clamp(gy, grid.minY, grid.maxY)
+  const ggz = clamp(gz, grid.minZ, grid.maxZ)
+
+  const ix = Math.floor((ggx - grid.minX) / sx)
+  const iy = Math.floor((ggy - grid.minY) / sy)
+  const iz = Math.floor((ggz - grid.minZ) / sz)
 
   const x0 = grid.minX + ix * sx
   const y0 = grid.minY + iy * sy
@@ -116,9 +124,9 @@ function interpolateWindFast(
   const y1 = y0 + sy
   const z1 = z0 + sz
 
-  const fx = sx > 0 ? Math.max(0, Math.min(1, (gx - x0) / sx)) : 0
-  const fy = sy > 0 ? Math.max(0, Math.min(1, (gy - y0) / sy)) : 0
-  const fz = sz > 0 ? Math.max(0, Math.min(1, (gz - z0) / sz)) : 0
+  const fx = sx > 0 ? Math.max(0, Math.min(1, (ggx - x0) / sx)) : 0
+  const fy = sy > 0 ? Math.max(0, Math.min(1, (ggy - y0) / sy)) : 0
+  const fz = sz > 0 ? Math.max(0, Math.min(1, (ggz - z0) / sz)) : 0
 
   let totalWeight = 0
   let wx = 0, wy = 0, wz = 0
@@ -165,24 +173,29 @@ export function useWindParticles() {
 
   function spawnParticle(windField: WindFieldSample[]): Particle {
     const sample = windField[Math.floor(Math.random() * windField.length)]
-    const geo = gridToGeo(sample.x, sample.y)
-    const jitter = () => (Math.random() - 0.5) * 0.001
+    /** Jitter en indices grille (~fraction de cellule), pas en ° — sinon on sort du champ vent (mock 3×3). */
+    const jx = (Math.random() - 0.5) * 0.45
+    const jy = (Math.random() - 0.5) * 0.45
+    const geo = gridToGeo(sample.x + jx, sample.y + jy)
+    const alt =
+      sample.z * ALT_METERS_PER_GRID_Z + (Math.random() - 0.5) * ALT_METERS_PER_GRID_Z
     return {
       position: Cartesian3.fromDegrees(
-        geo.lon + jitter(),
-        geo.lat + jitter(),
-        sample.z * 2 + Math.random() * 50,
+        geo.lon,
+        geo.lat,
+        Math.max(0, alt),
       ),
       velocity: [sample.vx, sample.vy, sample.vz],
       age: 0,
       maxAge: BASE_MAX_AGE + Math.random() * 60,
+      gridZ: sample.z,
     }
   }
 
   function geoToGrid(lonDeg: number, latDeg: number): { gx: number; gy: number } {
     return {
-      gx: (lonDeg - ORIGIN_LON) / CELL_SIZE_DEG,
-      gy: (latDeg - ORIGIN_LAT) / CELL_SIZE_DEG,
+      gx: (lonDeg - OVERLAY_ORIGIN_LON) / OVERLAY_CELL_DEG,
+      gy: (latDeg - OVERLAY_ORIGIN_LAT) / OVERLAY_CELL_DEG,
     }
   }
 
@@ -228,17 +241,17 @@ export function useWindParticles() {
         const cartographic = ellipsoid.cartesianToCartographic(p.position)
         const lonDeg = CesiumMath.toDegrees(cartographic.longitude)
         const latDeg = CesiumMath.toDegrees(cartographic.latitude)
-        const alt = cartographic.height
 
         const { gx, gy } = geoToGrid(lonDeg, latDeg)
-        const gz = alt / 2
+        const gz = p.gridZ
 
         const [vx, vy, vz] = interpolateWindFast(gx, gy, gz, grid)
         p.velocity = [vx, vy, vz]
 
         const newLon = lonDeg + vx * SPEED_SCALE
         const newLat = latDeg + vy * SPEED_SCALE
-        const newAlt = Math.max(0, alt + vz * SPEED_SCALE * 100)
+        // Hauteur suivant la couche du modèle (évite alt/2 confondu avec l'indice z).
+        const newAlt = Math.max(0, p.gridZ * ALT_METERS_PER_GRID_Z)
 
         p.position = Cartesian3.fromDegrees(newLon, newLat, newAlt)
 
@@ -253,6 +266,10 @@ export function useWindParticles() {
         pp.color = color
         pp.pixelSize = 2 + speed * 0.3
       }
+
+      // Cesium n’affiche pas les mises à jour de primitives tant que la scène n’est pas invalidée
+      // (souvent avec requestRenderMode actif).
+      viewer.scene.requestRender()
 
       animationFrame = requestAnimationFrame(animate)
     }

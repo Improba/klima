@@ -6,35 +6,37 @@
       </q-card-section>
 
       <q-card-section class="q-pt-none">
-        <q-input
-          v-model="name"
-          label="Nom du projet"
-          dark
-          filled
-          :rules="[(v: string) => !!v || 'Le nom est requis']"
-          class="q-mb-md"
-        />
-        <q-input
-          v-model="description"
-          label="Description (optionnel)"
-          dark
-          filled
-          type="textarea"
-          autogrow
-        />
+        <q-form @submit.prevent="save">
+          <q-input
+            v-model="name"
+            label="Nom du projet"
+            dark
+            filled
+            :rules="[(v: string) => !!v?.trim() || 'Le nom est requis']"
+            lazy-rules
+            class="q-mb-md"
+          />
+          <q-input
+            v-model="description"
+            label="Description (optionnel)"
+            dark
+            filled
+            type="textarea"
+            autogrow
+          />
+          <q-card-actions align="right" class="q-px-none q-pb-none q-pt-md">
+            <q-btn flat label="Annuler" color="grey" v-close-popup type="button" />
+            <q-btn
+              unelevated
+              label="Créer"
+              color="cyan"
+              type="submit"
+              :loading="saving"
+              :disable="!name.trim()"
+            />
+          </q-card-actions>
+        </q-form>
       </q-card-section>
-
-      <q-card-actions align="right">
-        <q-btn flat label="Annuler" color="grey" v-close-popup />
-        <q-btn
-          unelevated
-          label="Créer"
-          color="cyan"
-          :loading="saving"
-          :disable="!name.trim()"
-          @click="save"
-        />
-      </q-card-actions>
     </q-card>
   </q-dialog>
 </template>
@@ -67,8 +69,13 @@ async function save() {
     emit('update:modelValue', false)
     name.value = ''
     description.value = ''
-  } catch {
-    $q.notify({ type: 'negative', message: 'Erreur lors de la création' })
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    $q.notify({
+      type: 'negative',
+      message: 'Erreur lors de la création',
+      caption: detail.length > 120 ? `${detail.slice(0, 120)}…` : detail,
+    })
   } finally {
     saving.value = false
   }

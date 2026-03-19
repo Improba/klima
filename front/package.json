@@ -23,8 +23,9 @@
     "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^9.0.0",
     "eslint-plugin-vue": "^9.0.0",
+    "sass": "^1.80.0",
     "typescript": "~5.7.0",
-    "vite-plugin-cesium": "^1.2.0",
+    "vite-plugin-static-copy": "^2.2.0",
     "vue-tsc": "^2.0.0"
   }
 }

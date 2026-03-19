@@ -98,25 +98,59 @@ fn compute_cache_key(req: &SimulateRequest) -> String {
     format!("{:x}", hasher.finish())
 }
 
+/// Must match `ORIGIN_*` and `CELL_SIZE_DEG` in `front/src/composables/useThermalOverlay.ts`
+/// and `useWindParticles.ts`. API `lon`/`lat` on surface points and `x`/`y` on wind samples are
+/// grid indices, not WGS84 — the viewer maps them to degrees around this origin.
+const OVERLAY_ORIGIN_LON: f64 = 2.3400;
+const OVERLAY_ORIGIN_LAT: f64 = 48.8500;
+const OVERLAY_CELL_DEG: f64 = 0.00002;
+
+fn wgs84_to_overlay_grid(lon: f64, lat: f64) -> (f64, f64) {
+    let gx = ((lon - OVERLAY_ORIGIN_LON) / OVERLAY_CELL_DEG).round();
+    let gy = ((lat - OVERLAY_ORIGIN_LAT) / OVERLAY_CELL_DEG).round();
+    (gx, gy)
+}
+
+fn mock_wind_samples(center_x: f64, center_y: f64) -> Vec<postprocessor::WindFieldSample> {
+    let mut out = Vec::with_capacity(9);
+    for dx in -1..=1 {
+        for dy in -1..=1 {
+            out.push(postprocessor::WindFieldSample {
+                x: center_x + f64::from(dx),
+                y: center_y + f64::from(dy),
+                z: 0.0,
+                vx: 1.0,
+                vy: 0.35,
+                vz: 0.0,
+            });
+        }
+    }
+    out
+}
+
 fn generate_mock_result(geometry: &[GeometryBlock], t_ambient: f64) -> SimulationResult {
     let surface_temperatures: Vec<_> = geometry
         .iter()
-        .map(|b| postprocessor::SurfaceTemperature {
-            lon: b.x,
-            lat: b.y,
-            alt: b.z,
-            temperature: t_ambient + 2.0,
+        .map(|b| {
+            let (gx, gy) = wgs84_to_overlay_grid(b.x, b.y);
+            postprocessor::SurfaceTemperature {
+                lon: gx,
+                lat: gy,
+                alt: b.z,
+                temperature: t_ambient + 2.0,
+            }
         })
         .collect();
 
-    let wind_field = vec![postprocessor::WindFieldSample {
-        x: 0.0,
-        y: 0.0,
-        z: 0.0,
-        vx: 1.0,
-        vy: 0.0,
-        vz: 0.0,
-    }];
+    let (cx, cy) = if surface_temperatures.is_empty() {
+        (0.0, 0.0)
+    } else {
+        let sx: f64 = surface_temperatures.iter().map(|s| s.lon).sum();
+        let sy: f64 = surface_temperatures.iter().map(|s| s.lat).sum();
+        let n = surface_temperatures.len() as f64;
+        (sx / n, sy / n)
+    };
+    let wind_field = mock_wind_samples(cx, cy);
 
     SimulationResult {
         metadata: postprocessor::ResultMetadata {

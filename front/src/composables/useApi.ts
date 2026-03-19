@@ -45,9 +45,13 @@ export function useApi() {
   }
 
   async function createProject(name: string, description?: string): Promise<Project> {
+    const payload =
+      description != null && description !== ''
+        ? { name, description }
+        : { name }
     return request<Project>('/projects', {
       method: 'POST',
-      body: JSON.stringify({ name, description: description ?? null }),
+      body: JSON.stringify(payload),
     })
   }
 

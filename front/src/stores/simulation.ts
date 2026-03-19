@@ -39,6 +39,11 @@ export const useSimulationStore = defineStore('simulation', () => {
     lastResult.value = null
   }
 
+  function resetForProject() {
+    lastResult.value = null
+    geometry.value = []
+  }
+
   return {
     lastResult,
     isSimulating,
@@ -46,5 +51,6 @@ export const useSimulationStore = defineStore('simulation', () => {
     params,
     runSimulation,
     clearResult,
+    resetForProject,
   }
 })

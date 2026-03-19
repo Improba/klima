@@ -81,6 +81,11 @@ pub async fn run_migrations(pool: &PgPool) -> Result<()> {
     .execute(pool)
     .await?;
 
+    // Existing DBs may have been created with `description NOT NULL`; keep the column optional.
+    let _ = sqlx::query("ALTER TABLE projects ALTER COLUMN description DROP NOT NULL")
+        .execute(pool)
+        .await;
+
     Ok(())
 }
 
