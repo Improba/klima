@@ -116,13 +116,13 @@ def evaluate(
         tgt = batch["output"].to(device, non_blocking=True)
         mask_air = batch["mask_air"].to(device, non_blocking=True)
 
-        dt_tgt = tgt[:, 0:1] * mask_air
-        ss_tot_temp += ((dt_tgt - mean_temp) ** 2).sum().item()
+        dt_tgt = tgt[:, 0:1]
+        ss_tot_temp += (((dt_tgt - mean_temp) ** 2) * mask_air).sum().item()
 
         tgt_speed = torch.sqrt(
             tgt[:, 1:2] ** 2 + tgt[:, 2:3] ** 2 + tgt[:, 3:4] ** 2 + 1e-8
-        ) * mask_air
-        ss_tot_wind += ((tgt_speed - mean_wind) ** 2).sum().item()
+        )
+        ss_tot_wind += (((tgt_speed - mean_wind) ** 2) * mask_air).sum().item()
 
     r2_temp = 1.0 - ss_res_temp / max(ss_tot_temp, 1e-8)
     r2_wind = 1.0 - ss_res_wind / max(ss_tot_wind, 1e-8)
