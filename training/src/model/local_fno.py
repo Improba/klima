@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from typing import Tuple
 
 
@@ -65,20 +64,29 @@ class SpectralConv3d(nn.Module):
             dtype=torch.cfloat, device=x.device,
         )
 
-        m1, m2, m3 = self.modes1, self.modes2, self.modes3
+        # Clamp modes to actual frequency dimensions
+        m1 = min(self.modes1, x_ft.shape[-3] // 2)
+        m2 = min(self.modes2, x_ft.shape[-2] // 2)
+        m3 = min(self.modes3, x_ft.shape[-1])
+
+        # Truncate weight tensors when modes are clamped
+        w1 = self.weights1[:, :, :m1, :m2, :m3]
+        w2 = self.weights2[:, :, :m1, :m2, :m3]
+        w3 = self.weights3[:, :, :m1, :m2, :m3]
+        w4 = self.weights4[:, :, :m1, :m2, :m3]
 
         # Four quadrants in the (kx, ky) plane (kz is real-FFT so only positive)
         out_ft[:, :, :m1, :m2, :m3] = self._compl_mul3d(
-            x_ft[:, :, :m1, :m2, :m3], self.weights1
+            x_ft[:, :, :m1, :m2, :m3], w1
         )
         out_ft[:, :, -m1:, :m2, :m3] = self._compl_mul3d(
-            x_ft[:, :, -m1:, :m2, :m3], self.weights2
+            x_ft[:, :, -m1:, :m2, :m3], w2
         )
         out_ft[:, :, :m1, -m2:, :m3] = self._compl_mul3d(
-            x_ft[:, :, :m1, -m2:, :m3], self.weights3
+            x_ft[:, :, :m1, -m2:, :m3], w3
         )
         out_ft[:, :, -m1:, -m2:, :m3] = self._compl_mul3d(
-            x_ft[:, :, -m1:, -m2:, :m3], self.weights4
+            x_ft[:, :, -m1:, -m2:, :m3], w4
         )
 
         return torch.fft.irfftn(out_ft, s=(nx, ny, nz), dim=[-3, -2, -1])

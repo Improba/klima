@@ -136,8 +136,8 @@ class CFDDataset(Dataset):
         # Rotate wind direction encoding in input (channels 11, 12)
         sin_dir = inp[11].clone()
         cos_dir = inp[12].clone()
-        inp[11] = cos_a * sin_dir - sin_a * cos_dir
-        inp[12] = sin_a * sin_dir + cos_a * cos_dir
+        inp[11] = cos_a * sin_dir + sin_a * cos_dir  # sin(θ + φ)
+        inp[12] = cos_a * cos_dir - sin_a * sin_dir  # cos(θ + φ)
 
         return inp, out
 

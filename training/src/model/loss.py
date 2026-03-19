@@ -190,11 +190,10 @@ class PINNLoss(nn.Module):
             (pred_vx ** 2 + pred_vy ** 2 + pred_vz ** 2) * mask_solid
         ).sum() / n_solid
 
-        # Term 5: ||∂T/∂t - α∇²T||² on surface voxels
-        # Steady-state approximation: ∂T/∂t ≈ ΔT_pred - ΔT_target
+        # Term 5: Steady-state heat equation residual: α∇²T ≈ 0 at surfaces
         lap_t = laplacian_3d(pred_temp, self.dx)
-        dt_residual = (pred_temp - tgt_temp) - alpha_field * lap_t
-        loss_diffusion = (dt_residual ** 2 * mask_surface).sum() / n_surface
+        diffusion_residual = alpha_field * lap_t
+        loss_diffusion = (diffusion_residual[mask_surface.expand_as(diffusion_residual)] ** 2).mean()
 
         total = (
             self.lambda_temp * loss_temp
