@@ -1,0 +1,15 @@
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.cesium-viewer {
+  .cesium-viewer-toolbar,
+  .cesium-viewer-animationContainer,
+  .cesium-viewer-timelineContainer,
+  .cesium-viewer-fullscreenContainer,
+  .cesium-viewer-bottom {
+    display: none !important;
+  }
+}

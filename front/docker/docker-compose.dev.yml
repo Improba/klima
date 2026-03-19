@@ -1,0 +1,24 @@
+services:
+  klima-front:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dev
+    container_name: klima-front
+    ports:
+      - "9000:9000"
+    volumes:
+      - ../:/app
+      - node-modules:/app/node_modules
+    environment:
+      - VITE_CESIUM_ION_TOKEN=${CESIUM_ION_TOKEN:-}
+      - VITE_API_BASE_URL=http://klima-back:3000
+    networks:
+      - klima-net
+
+volumes:
+  node-modules:
+
+networks:
+  klima-net:
+    name: klima-net
+    external: true

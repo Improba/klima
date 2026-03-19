@@ -1,44 +1,44 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-*.egg-info/
-*.egg
-dist/
-build/
-.eggs/
+# === Rust (back/) ===
+back/target/
+**/*.rs.bk
+*.db
+*.db-wal
+*.db-shm
 
-# Virtual environments
-.venv/
-venv/
-env/
+# === Node / Vue (front/) ===
+front/node_modules/
+front/dist/
+front/.quasar/
+front/src-capacitor/
+front/src-cordova/
 
-# IDE
+# === IDE ===
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS
+# === OS ===
 .DS_Store
 Thumbs.db
 
-# Environment variables
+# === Environment ===
 .env
 .env.local
 .env.*.local
 
-# Testing / Coverage
-.coverage
-htmlcov/
-.pytest_cache/
-.mypy_cache/
+# === Docker ===
+docker-compose.override.yml
 
-# Logs
+# === Logs ===
 *.log
+npm-debug.log*
 
-# Distribution
-*.tar.gz
-*.whl
+# === ONNX models (large files) ===
+*.onnx
+
+# === Python (training scripts if any) ===
+__pycache__/
+*.py[cod]
+.venv/

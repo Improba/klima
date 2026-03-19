@@ -1,38 +1,58 @@
-# klima
+# Klima
 
-Projet climat.
+Simulateur IA *Surrogate* de microclimat urbain 3D.
 
-## Installation
+Application web permettant de simuler en temps réel l'impact thermique des aménagements urbains (îlots de chaleur, flux d'air) grâce à un modèle d'IA de substitution, en remplacement des simulations CFD traditionnelles.
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-```
+## Stack technique
 
-## Utilisation
+| Couche | Technologie |
+|--------|-------------|
+| Backend API & Inférence | **Rust** — Axum, ONNX Runtime (`ort`), SQLite |
+| Frontend Visualisation 3D | **Vue.js 3** — Quasar, CesiumJS |
+| Modèle IA | **ONNX** (entraîné via PyTorch) |
+| Infrastructure dev | **Docker** + Docker Compose |
 
-```bash
-klima
-```
-
-## Tests
+## Démarrage rapide
 
 ```bash
-pip install pytest
-pytest
+# Prérequis : Docker >= 24.0, Docker Compose >= 2.20
+
+git clone git@github.com:Improba/klima.git
+cd klima
+./scripts/run-dev.sh up
 ```
 
-## Structure du projet
+- Backend : http://localhost:3000
+- Frontend : http://localhost:9000
+
+## Structure du monorepo
 
 ```
 klima/
-├── src/
-│   └── klima/          # Code source
-│       ├── __init__.py
-│       └── main.py
-├── tests/              # Tests
-│   └── test_main.py
-├── pyproject.toml      # Configuration du projet
+├── back/           Rust / Axum — API + inférence ONNX + SQLite
+├── front/          Vue.js / Quasar / CesiumJS — interface 3D
+├── docs/           Documentation projet
+├── scripts/        Scripts d'orchestration
 └── README.md
 ```
+
+## Commandes courantes
+
+```bash
+# Entrer dans les containers
+docker exec -it klima-back  bash   # pour cargo build, cargo add, etc.
+docker exec -it klima-front bash   # pour npm install, quasar dev, etc.
+
+# Gestion
+./scripts/run-dev.sh up            # Démarrer
+./scripts/run-dev.sh down          # Arrêter
+./scripts/run-dev.sh logs          # Logs
+./scripts/run-dev.sh restart       # Redémarrer
+```
+
+## Documentation
+
+- [Spécification complète](docs/specification.md)
+- [Architecture technique](docs/architecture.md)
+- [Guide d'installation](docs/setup.md)

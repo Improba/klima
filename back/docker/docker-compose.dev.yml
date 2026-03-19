@@ -1,0 +1,25 @@
+services:
+  klima-back:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dev
+    container_name: klima-back
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../:/app
+      - cargo-cache:/usr/local/cargo/registry
+      - target-cache:/app/target
+    environment:
+      - RUST_LOG=klima_api=debug,tower_http=debug
+    networks:
+      - klima-net
+
+volumes:
+  cargo-cache:
+  target-cache:
+
+networks:
+  klima-net:
+    name: klima-net
+    external: true
