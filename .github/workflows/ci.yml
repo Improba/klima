@@ -10,6 +10,20 @@ jobs:
   backend:
     name: Backend (Rust)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: klima
+          POSTGRES_USER: klima
+          POSTGRES_PASSWORD: klima
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -35,21 +49,6 @@ jobs:
         env:
           DATABASE_URL: postgres://klima:klima@localhost:5432/klima
 
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_DB: klima
-          POSTGRES_USER: klima
-          POSTGRES_PASSWORD: klima
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
   frontend:
     name: Frontend (Vue/Quasar)
     runs-on: ubuntu-latest
@@ -71,7 +70,7 @@ jobs:
         run: npx vue-tsc --noEmit
 
   training:
-    name: Training (Python)
+    name: Training (Python syntax)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,39 +79,5 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Syntax check
-        run: python -c "
-          import ast, os, sys;
-          errors = [];
-          [errors.append(f'{os.path.join(r,f)}: {e}')
-           for r, _, fs in os.walk('training/src')
-           for f in fs if f.endswith('.py')
-           for e in [None]
-           if (e := (lambda p: (ast.parse(open(p).read()), None)[-1] if True else None)(os.path.join(r,f))) is not None
-          ] if False else None;
-          ok = True;
-          [print(f'OK') for _ in range(1)]
-          "
-        shell: bash
-
       - name: Validate Python syntax
-        run: |
-          python3 -c "
-          import ast, os, sys
-          errors = []
-          for root, dirs, files in os.walk('training/src'):
-              dirs[:] = [d for d in dirs if d != '__pycache__']
-              for f in files:
-                  if f.endswith('.py'):
-                      path = os.path.join(root, f)
-                      try:
-                          with open(path) as fh:
-                              ast.parse(fh.read())
-                      except SyntaxError as e:
-                          errors.append(f'{path}: {e}')
-          if errors:
-              for e in errors:
-                  print(f'ERROR: {e}', file=sys.stderr)
-              sys.exit(1)
-          print(f'All Python files OK')
-          "
+        run: python3 scripts/check_python_syntax.py
