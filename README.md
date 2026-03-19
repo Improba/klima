@@ -8,9 +8,10 @@ Application web permettant de simuler en temps réel l'impact thermique des amé
 
 | Couche | Technologie |
 |--------|-------------|
-| Backend API & Inférence | **Rust** — Axum, ONNX Runtime (`ort`), SQLite |
+| Backend API & Inférence | **Rust** — Axum, ONNX Runtime (`ort`), PostgreSQL |
+| Modèle IA | **Local-FNO** (Fourier Neural Operator) + PINN, export ONNX |
 | Frontend Visualisation 3D | **Vue.js 3** — Quasar, CesiumJS |
-| Modèle IA | **ONNX** (entraîné via PyTorch) |
+| Entraînement IA | Python, PyTorch, NVIDIA Modulus / neuraloperator |
 | Infrastructure dev | **Docker** + Docker Compose |
 
 ## Démarrage rapide

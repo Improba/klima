@@ -1,9 +1,8 @@
 # === Rust (back/) ===
 back/target/
 **/*.rs.bk
-*.db
-*.db-wal
-*.db-shm
+# === sqlx offline query data ===
+back/.sqlx/
 
 # === Node / Vue (front/) ===
 front/node_modules/

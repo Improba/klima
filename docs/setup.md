@@ -24,6 +24,7 @@ Les services sont ensuite accessibles :
 |---------|-----|
 | Backend (API Rust) | http://localhost:3000 |
 | Frontend (Quasar) | http://localhost:9000 |
+| PostgreSQL | localhost:5432 (user: klima, pass: klima, db: klima) |
 
 ## Commandes utiles
 

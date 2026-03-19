@@ -30,12 +30,12 @@
 | Docker dev | Dockerfile + compose pour back et front | `{back,front}/docker/*` |
 | Script orchestrateur | `run-dev.sh` (up/down/logs/restart) | `scripts/run-dev.sh` |
 | Documentation | Spec, architecture, setup | `docs/*.md` |
-| Base de données | Schema SQLite (projects, simulations, scenarios) | `back/src/db/mod.rs` |
+| Base de données | Schema PostgreSQL 16 (projects, simulations, scenarios) via sqlx | `back/src/db/mod.rs` |
 
 ### Ce qui manque pour un produit fonctionnel
 
 1. **Pipeline de données Python** — acquisition géospatiale, classification LiDAR, voxelisation, CFD
-2. **Modèle IA Surrogate** — entraînement U-Net 3D / GNN, export ONNX
+2. **Modèle IA Surrogate** — entraînement Local-FNO PINN, export ONNX
 3. **Backend fonctionnel** — CRUD, inférence ONNX réelle, compression résultats
 4. **Frontend fonctionnel** — édition de scène, appel API, visualisation thermique + vent
 5. **Validation scientifique** — comparaison prédictions vs vérité terrain (satellite + cohérence physique)
@@ -65,11 +65,11 @@
 | ID | Tâche | Livrable | Dépendances |
 |----|-------|----------|-------------|
 | `P0.1` | CI/CD GitHub Actions : lint (clippy + eslint), test, build | `.github/workflows/ci.yml` | — |
-| `P0.2` | Infrastructure de test backend (cargo test, tests d'intégration avec SQLite en mémoire) | `back/tests/` | — |
+| `P0.2` | Infrastructure de test backend (cargo test, tests d'intégration avec PostgreSQL de test via testcontainers ou base dédiée) | `back/tests/` | — |
 | `P0.3` | Infrastructure de test frontend (Vitest, tests composants Vue) | `front/vitest.config.ts`, `front/src/**/*.test.ts` | — |
 | `P0.4` | Gestion d'erreurs structurée backend (type `AppError`, codes HTTP cohérents) | `back/src/error.rs` | — |
 | `P0.5` | Spécification OpenAPI du contrat d'API (JSON Schema des requêtes/réponses) + spécification du format tenseur I/O pour le modèle ONNX | `docs/api/openapi.yml`, `docs/api/tensor-spec.md` | — |
-| `P0.6` | Pipeline Python : Dockerfile + docker-compose (Python 3.12, PyTorch, GeoPandas, laspy, PyVista) | `training/docker/` | — |
+| `P0.6` | Pipeline Python : Dockerfile + docker-compose (Python 3.12, PyTorch, NVIDIA Modulus / neuraloperator, GeoPandas, laspy, PyVista) | `training/docker/` | — |
 | `P0.7` | Structure du dossier `training/` dans le monorepo | `training/{src,data,models,configs}/` | — |
 | `P0.8` | Mock ONNX model (2 couches linéaires, mêmes dimensions I/O que la spec tenseur) pour débloquer le backend et le frontend | `training/src/model/mock_onnx.py` → `back/models/mock.onnx` | P0.5 |
 
@@ -115,7 +115,7 @@
 | `P2.1` | Conteneurisation OpenFOAM | Dockerfile basé sur `openfoam/openfoam2406-default`. Scripts de setup et lancement. | `training/docker/Dockerfile.openfoam` |
 | `P2.2` | Convertisseur voxels → maillage OpenFOAM | Transformer la grille voxelisée **CFD** en maillage `blockMesh` + `snappyHexMesh`. Boundary conditions : inlet (profil de vent), outlet (zero gradient), ground (wall + flux thermique), top (symmetry), sides (cyclic ou zero gradient). | `training/src/cfd/voxel_to_mesh.py` |
 | `P2.3` | Template de cas OpenFOAM | Solveur `buoyantSimpleFoam` (RANS stationnaire, Boussinesq). Turbulence k-ω SST. Rayonnement `fvDOM` (Finite Volume Discrete Ordinates, plus scalable que `viewFactor` sur maillages > 1M faces). Fichiers `0/`, `constant/`, `system/`. | `training/src/cfd/case_template/` |
-| `P2.4` | Générateur paramétrique de scénarios | Échantillonnage Latin Hypercube (LHS) sur l'espace des paramètres : wind_speed ∈ [0.5, 15] m/s, wind_direction ∈ [0°, 360°), sun_elevation ∈ [10°, 80°], albédo_toits ∈ [0.1, 0.8], T_air_ambiant ∈ [20, 40] °C. Cible : **N = 300 simulations**. | `training/src/cfd/scenario_generator.py` |
+| `P2.4` | Générateur paramétrique de scénarios | Échantillonnage Latin Hypercube (LHS) sur l'espace des paramètres : wind_speed ∈ [0.5, 15] m/s, wind_direction ∈ [0°, 360°), sun_elevation ∈ [10°, 80°], albédo_toits ∈ [0.1, 0.8], T_air_ambiant ∈ [20, 40] °C. Cible : **N = 24 à 50 simulations** (le FNO est data-efficient grâce à la régularisation PINN ; le Local-FNO a démontré des résultats sur 24 sims pour un quartier de 1.2 km). | `training/src/cfd/scenario_generator.py` |
 | `P2.5` | Runner batch de simulations | Orchestrateur qui lance les N simulations OpenFOAM (via GNU parallel ou job queue). Capture des résultats, gestion des échecs et relances, logging. | `training/src/cfd/batch_runner.py` |
 | `P2.6` | Parseur de résultats CFD | Extraction des champs T(x,y,z) et v(x,y,z) depuis les fichiers OpenFOAM. Ré-échantillonnage sur la grille voxel ML (256×256×64) : interpolation trilinéaire depuis le maillage CFD non-structuré. Conversion de T absolu en **ΔT = T - T_ambiant** (le réseau prédit l'écart à la température ambiante, plus robuste et généralisable). | `training/src/cfd/result_parser.py` |
 | `P2.7` | Constitution du dataset final | Concaténation des N paires. Format HDF5 avec groupes `inputs/` et `outputs/`. Séparation train/val/test (70/15/15, stratifié par wind_speed et sun_elevation). Métadonnées : paramètres de chaque simulation. | `training/src/cfd/dataset_builder.py` |
@@ -124,43 +124,44 @@
 **Critère de sortie** : Dataset HDF5 de ~300 paires, documenté, avec splits train/val/test et rapport de qualité.
 
 **Dimensionnement** :
-- 300 simulations × ~3-4h/sim (RANS k-ω SST + fvDOM sur maillage ~5M cells) = ~1000 h CPU
-- Parallélisé sur 32 cœurs : ~32h wall-clock
-- Taille dataset (domaine ML uniquement) : 300 × (256×256×64×4) × 4 bytes ≈ **20 Go**
+- 50 simulations × ~3-4h/sim (RANS k-ω SST + fvDOM sur maillage ~5M cells) = ~175 h CPU
+- Parallélisé sur 16 cœurs : ~11h wall-clock
+- Taille dataset (domaine ML uniquement) : 50 × (256×256×64×4) × 4 bytes ≈ **3.4 Go**
+- Réduction drastique vs CNN classique (~300 sims) grâce à l'efficacité du FNO + régularisation PINN
 
 ---
 
-### Phase 3 — Entraînement du Surrogate Model
+### Phase 3 — Entraînement du Local-FNO PINN
 
-**Objectif** : Entraîner un réseau de neurones capable de prédire ΔT(x,y,z) et v(x,y,z) en <100 ms pour une configuration géométrique et météo donnée.
+**Objectif** : Entraîner un Fourier Neural Operator (FNO) localisé, contraint par la physique (PINN), capable de prédire ΔT(x,y,z) et v(x,y,z) en < 200 ms — avec **zero-shot super-résolution** (évaluation à n'importe quelle résolution sans ré-entraînement).
 
 #### 3a. Architecture du modèle
 
 | ID | Tâche | Détails | Livrable |
 |----|-------|---------|----------|
 | `P3.1` | Encodage des entrées | Canaux d'entrée du tenseur (grille 256×256×64) : **géométrie** — occupancy binaire (1), type de surface one-hot (6 classes → 6), propriétés physiques continues (α, ε, z₀ → 3) ; **conditions limites broadcastées** — wind_speed (1), wind_dir encodé (sin θ, cos θ → 2), sun_elevation (1), T_ambiant (1). **Total : 15 canaux d'entrée.** La direction du vent est encodée en (sin, cos) pour éviter la discontinuité 0°/360°. | `training/src/model/encoding.py` |
-| `P3.2` | Architecture U-Net 3D | Encoder : 4 niveaux (Conv3D 3×3×3 → GroupNorm → GELU → Conv3D → GroupNorm → GELU → MaxPool 2×2×2). Bottleneck. Decoder symétrique avec skip connections (concaténation). Canaux de sortie : **4** (ΔT, vx, vy, vz). Résolution par niveau : 256→128→64→32→16 (bottleneck) →32→64→128→256. Canaux initiaux : 48. Paramétrable (profondeur, canaux). | `training/src/model/unet3d.py` |
-| `P3.3` | Fonction de perte PINN | Voir section 4.4 pour la formule complète. 4 termes : MSE(ΔT), MSE(v), divergence, no-slip. Le gradient discret (∇·v) est calculé par **différences finies centrales** sur la grille régulière. Un masque binaire sépare les voxels air des voxels solides. | `training/src/model/loss.py` |
-| `P3.4` | Architecture GNN alternative | Graph construit à partir des voxels d'air uniquement (~1.2-1.5M nœuds pour un quartier urbain dense avec ~50% d'occupation). Connectivité 6-voisins. Message-passing avec attention (GAT). Plus adapté si la géométrie est très creuse ou si la généralisation inter-quartiers est prioritaire. | `training/src/model/gnn.py` |
+| `P3.2` | Architecture Local-FNO | **Couches Fourier spectrales** : chaque couche applique FFT 3D → multiplication par un noyau appris dans l'espace de Fourier (tronqué aux k_max premiers modes) → IFFT. 4 couches Fourier empilées. **Couches locales** : Conv3D 1×1×1 en résidu (bypass) pour capturer les interactions locales (sillage, turbulence de rue). Canaux de sortie : **4** (ΔT, vx, vy, vz). Implémentation via **NVIDIA Modulus** ou **neuraloperator** (PyTorch). k_max = 16 (modes de Fourier retenus par dimension). | `training/src/model/local_fno.py` |
+| `P3.3` | Fonction de perte PINN complète | 5 termes (voir section 4.4) : MSE(ΔT), MSE(v), divergence ∇·v ≈ 0, no-slip v=0 dans les solides, **diffusion thermique** ∂T/∂t − α∇²T = 0. Le gradient discret est calculé par **différences finies centrales** sur la grille régulière. Un masque binaire sépare les voxels air des voxels solides. | `training/src/model/loss.py` |
+| `P3.4` | Pipeline GeoJSON-to-Tensor | Convertisseur qui transforme un GeoJSON (polygone dessiné par l'utilisateur) en tenseur d'albédo/émissivité sur la grille voxel. Rasterisation du polygone → mise à jour du canal de type de surface et des propriétés physiques dans le tenseur d'entrée. Réutilisé côté backend Rust (P4.7). | `training/src/model/geojson_to_tensor.py` |
 
 #### 3b. Pipeline d'entraînement
 
 | ID | Tâche | Détails | Livrable |
 |----|-------|---------|----------|
 | `P3.5` | DataLoader PyTorch | Chargement HDF5. Normalisation z-score par canal (μ et σ calculés sur le train set, sauvegardés pour le backend). Augmentation : rotation 90°/180°/270° + flip horizontal/vertical. **Lors d'une rotation de k×90°, le vecteur vent (vx,vy) et l'encodage (sin θ, cos θ) de la direction d'entrée sont transformés de manière cohérente** (rotation de la matrice 2D correspondante). | `training/src/model/dataloader.py` |
-| `P3.6` | Boucle d'entraînement | Optimizer AdamW (weight decay 1e-4). Scheduler OneCycleLR (warm-up 5 epochs). Gradient clipping (max_norm=1.0). Logging TensorBoard ou W&B. Early stopping sur val_loss (patience=20). Mixed precision (AMP) pour réduire la mémoire. | `training/src/model/train.py` |
-| `P3.7` | Recherche d'hyperparamètres | Grid/random search sur : learning_rate ∈ [1e-4, 5e-3], λ₁..λ₄, profondeur U-Net (3-4), canaux initiaux (32, 48, 64). Objectif : minimiser RMSE(ΔT) + RMSE(|v|) sur le val set. | `training/src/model/hparam_search.py` |
-| `P3.8` | Évaluation quantitative | Métriques sur le test set : MAE, RMSE, R² pour ΔT et pour |v|. Ventilation par zone (rue/canyon, toit, parc, ombre/soleil). Cartes d'erreur spatiales. | `training/src/model/evaluate.py` |
+| `P3.6` | Boucle d'entraînement | Optimizer AdamW (weight decay 1e-4). Scheduler OneCycleLR (warm-up 5 epochs). Gradient clipping (max_norm=1.0). Logging TensorBoard ou W&B. Early stopping sur val_loss (patience=20). Mixed precision (AMP). **Le FNO est data-efficient : 24-50 simulations suffisent grâce à la régularisation PINN.** | `training/src/model/train.py` |
+| `P3.7` | Recherche d'hyperparamètres | Grid/random search sur : learning_rate ∈ [1e-4, 5e-3], λ₁..λ₅ (5 termes de loss), k_max (modes de Fourier : 8, 12, 16, 24), nombre de couches Fourier (3-6), largeur des couches (32, 64, 128). | `training/src/model/hparam_search.py` |
+| `P3.8` | Évaluation quantitative | Métriques sur le test set : MAE, RMSE, R² pour ΔT et |v|. Ventilation par zone (rue/canyon, toit, parc, ombre/soleil). **Test de super-résolution** : entraîner à 2 m, évaluer à 1 m et 0.5 m sans ré-entraînement (zero-shot). Comparer à la référence CFD interpolée. | `training/src/model/evaluate.py` |
 
 #### 3c. Export et validation du modèle
 
 | ID | Tâche | Détails | Livrable |
 |----|-------|---------|----------|
-| `P3.9` | Export ONNX | `torch.onnx.export()` avec dynamic axes pour batch_size. Validation croisée : comparer les sorties PyTorch vs ONNX Runtime sur 10 cas de test (tolérance atol=1e-5). Sauvegarder les paramètres de normalisation (μ, σ) dans un fichier JSON adjacent. | `training/src/model/export_onnx.py` → `models/klima_v1.onnx` + `models/klima_v1_norm.json` |
-| `P3.10` | Benchmark de latence | Mesurer le temps d'inférence sur CPU (8 threads) et GPU pour une entrée unique (1×15×256×256×64). Cible : **< 200 ms CPU, < 50 ms GPU**. | `training/src/model/benchmark.py` |
-| `P3.11` | Optimisation du graphe ONNX | ORT graph optimizations (OptimizerLevel::Level3 : fusion de couches, constant folding, shape inference). Quantization INT8 dynamique si latence CPU > 200 ms. | `training/src/model/optimize_onnx.py` |
+| `P3.9` | Export ONNX | `torch.onnx.export()` avec **dynamic axes** pour batch_size ET résolution spatiale (le FNO accepte des grilles de taille variable). Validation croisée PyTorch vs ONNX Runtime sur 10 cas de test (atol=1e-5). Sauvegarder les paramètres de normalisation (μ, σ). | `training/src/model/export_onnx.py` → `models/klima_v1.onnx` + `models/klima_v1_norm.json` |
+| `P3.10` | Benchmark de latence | Mesurer le temps d'inférence sur CPU (8 threads) et GPU pour : (a) résolution standard (256×256×64), (b) haute résolution (512×512×128 — zoom). Cible : **< 200 ms CPU standard, < 500 ms CPU haute-res**. | `training/src/model/benchmark.py` |
+| `P3.11` | Optimisation du graphe ONNX | ORT graph optimizations (Level3). La FFT 3D dans ONNX est supportée via les opérateurs DFT. Vérifier la compatibilité. Quantization INT8 dynamique si nécessaire. | `training/src/model/optimize_onnx.py` |
 
-**Critère de sortie** : Fichier `.onnx` validé, RMSE(ΔT) < 1.0 °C, MAE(ΔT) < 0.5 °C, RMSE(|v|) < 0.5 m/s, latence < 200 ms CPU.
+**Critère de sortie** : Fichier `.onnx` validé, RMSE(ΔT) < 1.0 °C, MAE(ΔT) < 0.5 °C, RMSE(|v|) < 0.5 m/s, latence < 200 ms CPU, super-résolution ×2 fonctionnelle.
 
 ---
 
@@ -174,7 +175,7 @@
 |----|-------|---------|----------|
 | `P4.1` | CRUD Projects | `POST/GET/PUT/DELETE /api/projects`. Pagination sur le listing. Tests d'intégration. | `back/src/routes/projects.rs` |
 | `P4.2` | CRUD Scenarios | `POST/GET/PUT/DELETE /api/projects/:id/scenarios`. Un scénario contient : géométrie modifiée (diff par rapport à la baseline), paramètres météo. | `back/src/routes/scenarios.rs` |
-| `P4.3` | Gestion des résultats de simulation | `GET /api/simulations/:id`. Stockage des résultats en BLOB compressé (zstd) dans SQLite. | `back/src/routes/simulations.rs` |
+| `P4.3` | Gestion des résultats de simulation | `GET /api/simulations/:id`. Stockage des résultats en BYTEA compressé (zstd) dans PostgreSQL. | `back/src/routes/simulations.rs` |
 | `P4.4` | Migrations versionnées | Système de migration incrémentale (numérotées) au lieu d'un `CREATE IF NOT EXISTS` monolithique. | `back/src/db/migrations/` |
 | `P4.5` | Validation des entrées | Validation structurelle des requêtes (bornes, types, tailles max). Utiliser `validator` ou validation manuelle. | `back/src/validation.rs` |
 
@@ -183,7 +184,7 @@
 | ID | Tâche | Détails | Livrable |
 |----|-------|---------|----------|
 | `P4.6` | Service ONNX (`OnnxService`) | Chargement du modèle `.onnx` au démarrage via `ort::Session`. Partagé via `Arc<OnnxService>` dans l'AppState. Gestion de l'absence de modèle (mode dégradé). Chargement des paramètres de normalisation (μ, σ) depuis le JSON adjacent. Versioning : supporte le chargement de différentes versions du modèle. | `back/src/inference/mod.rs` |
-| `P4.7` | Préprocesseur géométrie → tenseur | Transformer le JSON de géométrie (blocs, surfaces) en tenseur d'entrée `ndarray` (1×15×256×256×64). Appliquer la normalisation z-score avec les μ/σ du training. Reconstruction de la grille voxel depuis le `GeometryDiff` + baseline. | `back/src/inference/preprocessor.rs` |
+| `P4.7` | Préprocesseur GeoJSON → tenseur | **Pipeline GeoJSON-to-Tensor** : le frontend envoie des polygones GeoJSON (modifications de surface). Le backend les rasterise instantanément sur la grille voxel → mise à jour du tenseur d'albédo/émissivité/type de surface. Applique la normalisation z-score. Pour un zoom haute-res, le FNO est évalué sur une grille plus fine (dynamic axes ONNX). | `back/src/inference/preprocessor.rs` |
 | `P4.8` | Postprocesseur tenseur → résultat | Dénormaliser les sorties (ΔT → T = ΔT + T_ambiant). **Extraire uniquement les données utiles au frontend** : (a) températures de surface (sol, toits, façades) = ~100-300K valeurs ; (b) champ de vent sous-échantillonné pour les particules (grille 64×64×16) = ~65K vecteurs. Ne PAS envoyer le champ 3D complet (~4M valeurs). | `back/src/inference/postprocessor.rs` |
 | `P4.9` | Endpoint `/api/simulate` réel | Assembler P4.6 + P4.7 + P4.8. Mesurer et logguer le temps d'inférence. Sauvegarder le résultat en base. Format de réponse en 2 parties : `surface_temperatures` (indexé par coordonnées) + `wind_field` (grille sous-échantillonnée). | Mise à jour de `back/src/routes/simulate.rs` |
 
@@ -328,40 +329,53 @@ La marge de 5H autour de la zone d'intérêt suit les recommandations COST 732 (
 | Conditions limites inlet | Profil logarithmique de vent avec hauteur de déplacement | $U(z) = \frac{u_*}{\kappa} \ln\left(\frac{z - d}{z_0}\right)$ pour $z > d + z_0$, avec $\kappa = 0.41$, $z_0 = 1.0$ m (urbain dense, Grimmond & Oke 1999), $d = 0.7 \times H_{moy}$ (hauteur de déplacement). Pour H_moy ≈ 20 m : d ≈ 14 m. |
 | Conditions limites top | Symmetry (zero gradient pour U, p) | Minimise l'influence du bord supérieur sur l'écoulement. |
 
-### 4.3 Architecture du réseau neuronal
+### 4.3 Architecture du réseau neuronal : Local-FNO
 
-| Paramètre | U-Net 3D (recommandé) | GNN (alternative) |
-|-----------|------------------------|---------------------|
-| Input | Tenseur (B, 15, 256, 256, 64) | Graphe ~1.5M nœuds (voxels air, ~40-50% de la grille) |
-| Paramètres | ~10-20M | ~2-5M |
-| Mémoire entraînement | ~16-32 Go GPU (AMP) | ~8-16 Go GPU |
-| Latence inférence (CPU, 8 threads) | ~100-300 ms | ~200-800 ms |
-| Avantage | Exploite la structure régulière, convolutions très optimisées | Épars, potentiellement meilleure généralisation inter-quartiers |
-| Inconvénient | Calcule dans les zones solides (gaspillage ~50%) | Plus lent en inférence, implémentation ONNX moins mature pour les GNN |
+Le **Fourier Neural Operator** (Li et al. 2020) apprend un opérateur dans l'espace des fréquences, ce qui le rend **indépendant de la résolution** de la grille d'entrée. Le **Local-FNO** ajoute des couches convolutives locales pour capturer les phénomènes à petite échelle.
 
-**Recommandation** : Commencer avec le U-Net 3D (P3.2), évaluer. Si la généralisation inter-quartiers est insuffisante, explorer le GNN (P3.4).
+| Paramètre | Local-FNO (recommandé) | U-Net 3D (fallback) |
+|-----------|------------------------|----------------------|
+| Input | Tenseur (B, 15, N_x, N_y, N_z) — **résolution variable** | Tenseur (B, 15, 256, 256, 64) — résolution fixe |
+| Mécanisme | FFT 3D → noyau spectral appris → IFFT + résidu Conv3D local | Encoder-decoder convolutif avec skip connections |
+| k_max (modes Fourier) | 16 par dimension (tronque les hautes fréquences) | N/A |
+| Paramètres | ~5-12M | ~10-20M |
+| Mémoire entraînement | ~8-20 Go GPU (AMP) | ~16-32 Go GPU (AMP) |
+| Latence inférence (CPU) | ~100-300 ms (res. standard), ~300-600 ms (res. ×2) | ~100-300 ms (res. fixe uniquement) |
+| **Super-résolution** | **OUI** — zero-shot, évalue sur grille plus fine sans ré-entraînement | NON — résolution figée |
+| **Data efficiency** | **24-50 simulations** (régularisation PINN) | ~200-300 simulations |
+| Avantage clé | Apprend la physique dans l'espace spectral, généralise mieux | Simple, bien compris, convolutions très optimisées |
+| Export ONNX | Supporté (FFT via opérateur DFT) | Supporté nativement |
 
-### 4.4 Fonction de perte détaillée
+**Pourquoi le FNO est supérieur ici** : Pour un simulateur interactif où l'utilisateur zoome librement, la capacité de changer de résolution à la volée est un avantage décisif. Combiné à la réduction drastique du nombre de simulations CFD requises (24 vs 300), le FNO est le choix optimal pour Klima.
+
+### 4.4 Fonction de perte PINN complète
 
 Le réseau prédit **ΔT = T - T_ambiant** (écart à la température de fond) et **v = (vx, vy, vz)** (vecteur vent). Prédire ΔT plutôt que T absolu améliore la généralisation : le réseau apprend les *perturbations* induites par la géométrie, indépendamment de la température de base.
 
+La loss intègre **5 termes** — 2 de data-fidelity et 3 de contrainte physique :
+
 $$\mathcal{L}_{total} = \underbrace{\lambda_1 \frac{1}{N_{air}} \sum_{i \in \Omega_{air}} (\Delta T_i^{pred} - \Delta T_i^{cfd})^2}_{\text{MSE température (écart)}} + \underbrace{\lambda_2 \frac{1}{N_{air}} \sum_{i \in \Omega_{air}} \|\mathbf{v}_i^{pred} - \mathbf{v}_i^{cfd}\|^2}_{\text{MSE vent}}$$
 
-$$+ \underbrace{\lambda_3 \frac{1}{N_{air}} \sum_{i \in \Omega_{air}} \left( \frac{\partial v_x}{\partial x}\bigg|_i + \frac{\partial v_y}{\partial y}\bigg|_i + \frac{\partial v_z}{\partial z}\bigg|_i \right)^2}_{\text{Contrainte de divergence (quasi-incompressible)}}$$
+$$+ \underbrace{\lambda_3 \frac{1}{N_{air}} \sum_{i \in \Omega_{air}} (\nabla \cdot \mathbf{v}_i^{pred})^2}_{\text{Continuité (quasi-incompressible)}} + \underbrace{\lambda_4 \frac{1}{N_{sol}} \sum_{i \in \Omega_{solide}} \|\mathbf{v}_i^{pred}\|^2}_{\text{No-slip (v=0 dans les solides)}}$$
 
-$$+ \underbrace{\lambda_4 \frac{1}{N_{sol}} \sum_{i \in \Omega_{solide}} \|\mathbf{v}_i^{pred}\|^2}_{\text{Contrainte no-slip (v=0 dans les solides)}}$$
+$$+ \underbrace{\lambda_5 \frac{1}{N_{surf}} \sum_{i \in \Omega_{surface}} \left( \frac{\partial \Delta T_i}{\partial t} - \alpha_i \nabla^2 \Delta T_i \right)^2}_{\text{Diffusion thermique (équation de la chaleur)}}$$
+
+Le dernier terme (nouveau vs U-Net) force le modèle à respecter l'**équation de diffusion de la chaleur** aux surfaces. α_i est la diffusivité thermique du matériau au voxel i. C'est ce qui permet à l'utilisateur de voir la chaleur "couler" d'un toit végétalisé vers la rue de manière physiquement cohérente.
 
 Les dérivées partielles sont calculées par **différences finies centrales** sur la grille régulière :
 
 $$\frac{\partial v_x}{\partial x}\bigg|_{i,j,k} = \frac{v_x[i+1,j,k] - v_x[i-1,j,k]}{2 \Delta x}$$
 
-**Note physique** : La contrainte ∇·v ≈ 0 est une approximation. `buoyantSimpleFoam` résout les équations de Boussinesq où la densité varie légèrement avec la température. La divergence résiduelle attendue dans les données CFD est de l'ordre de ~1-5%. Le terme λ₃ est donc pondéré modérément pour ne pas sur-contraindre le réseau.
+$$\nabla^2 T\bigg|_{i,j,k} = \frac{T[i+1,j,k] - 2T[i,j,k] + T[i-1,j,k]}{\Delta x^2} + (\text{idem } y, z)$$
+
+**Note physique** : La contrainte ∇·v ≈ 0 est une approximation (Boussinesq). La divergence résiduelle dans les données CFD est ~1-5%. Le terme λ₃ est pondéré modérément.
 
 Valeurs initiales recommandées :
 - λ₁ = 1.0 (MSE ΔT, données normalisées z-score)
 - λ₂ = 1.0 (MSE v, données normalisées z-score)
-- λ₃ = 0.01 (divergence — faible car approximatif, sera ajusté en P3.7)
+- λ₃ = 0.01 (divergence — faible car approximatif)
 - λ₄ = 10.0 (no-slip — fort pour imposer v=0 dans les solides)
+- λ₅ = 0.1 (diffusion thermique — régularisation physique aux surfaces)
 
 ---
 
@@ -370,13 +384,14 @@ Valeurs initiales recommandées :
 | # | Risque | Impact | Probabilité | Mitigation |
 |---|--------|--------|-------------|------------|
 | R1 | Simulations OpenFOAM trop lentes (~1000h CPU) → dataset insuffisant ou retardé | Modèle peu précis, chemin critique allongé | Moyenne | (a) Commencer avec un domaine ML réduit (128³). (b) Utiliser des solveurs simplifiés (PALM-4U, ENVI-met) pour un dataset préliminaire. (c) Cloud computing (spot instances). |
-| R2 | U-Net 3D trop gourmand en mémoire pour 256×256×64 | Impossibilité d'entraîner sur un GPU standard (24 Go) | Moyenne | (a) Mixed precision (AMP) divise la mémoire par ~2. (b) Gradient checkpointing. (c) Réduire les canaux initiaux (32 au lieu de 48). (d) En dernier recours : patchification (patches 128×128×64 avec overlap). |
-| R3 | Le modèle ne généralise pas aux géométries modifiées par l'utilisateur | Prédictions aberrantes quand l'utilisateur modifie la scène | Haute | (a) Augmentation de données (rotations, flips) avec transformation cohérente du vent. (b) Entraîner sur 2-3 quartiers variés. (c) Mécanisme de détection d'outlier (incertitude du modèle via MC Dropout ou ensemble). (d) Limiter l'amplitude des modifications à ±N voxels. |
+| R2 | FNO trop gourmand en mémoire pour la FFT 3D sur 256×256×64 | Impossibilité d'entraîner sur un GPU standard (24 Go) | Faible (FNO plus léger que U-Net) | (a) Mixed precision (AMP). (b) Réduire k_max (modes Fourier). (c) Tronquer les dimensions (grille 128³). (d) Fallback vers U-Net 3D classique si le FNO ne converge pas. |
+| R3 | Le modèle ne généralise pas aux géométries modifiées par l'utilisateur | Prédictions aberrantes quand l'utilisateur modifie la scène | Moyenne (le FNO apprend dans l'espace spectral → meilleure généralisation que CNN) | (a) Augmentation de données (rotations, flips) avec transformation cohérente du vent. (b) Entraîner sur 2-3 quartiers variés. (c) Mécanisme de détection d'outlier (incertitude via MC Dropout ou ensemble). (d) Contraintes PINN comme régularisateur. |
 | R4 | Latence d'inférence ONNX > 200 ms | Expérience utilisateur dégradée | Faible | (a) Quantization INT8. (b) Modèle plus compact. (c) Inférence GPU côté serveur (CUDA execution provider). |
 | R5 | Cesium Ion rate limiting ou changement de pricing | Frontend 3D cassé | Faible | Supporter des tuiles 3D auto-hébergées (3DCityDB + serveur de tuiles local). |
 | R6 | Pas de données de validation in-situ à la résolution du modèle (2 m) | Impossible de quantifier l'erreur absolue du modèle | Haute | (a) Validation satellite qualitative (Landsat). (b) Tests de sensibilité physique (le modèle réagit correctement aux perturbations). (c) Validation croisée vs données CFD (test set). (d) À terme : déployer des capteurs IoT. |
 | R7 | Artefacts aux bords de la grille ML (effets de bord) | Températures et vents aberrants en périphérie de la zone | Moyenne | (a) La marge de 5H du domaine CFD protège la zone d'intérêt. (b) Padding réfléchissant lors de l'encodage. (c) Masquer les bords dans le postprocesseur (ne pas afficher les 10 premiers/derniers voxels). |
 | R8 | L'augmentation par rotation corrompt les données si le vent n'est pas co-tourné | Modèle entraîné sur des données incohérentes | Haute si non détecté | Implémenté dès P3.5 avec tests unitaires vérifiant la cohérence direction d'entrée ↔ champ de vent ↔ rotation. |
+| R9 | L'opérateur FFT 3D du FNO n'est pas bien supporté par ONNX Runtime | Export ONNX échoue ou performances dégradées | Moyenne | (a) Vérifier la compatibilité de l'opérateur DFT dans ORT avant de s'engager. (b) Fallback : implémenter la FFT comme des couches PyTorch standard exportables. (c) Dernière option : U-Net 3D classique. |
 
 ---
 

@@ -2,17 +2,20 @@ mod db;
 mod routes;
 
 use axum::Router;
+use sqlx::PgPool;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 pub struct AppState {
-    pub db: db::Database,
+    pub pool: PgPool,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    dotenvy::dotenv().ok();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -20,10 +23,15 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let database = db::Database::new("klima.db")?;
-    database.run_migrations()?;
+    let database_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://klima:klima@localhost:5432/klima".into());
 
-    let state = Arc::new(AppState { db: database });
+    tracing::info!("Connecting to PostgreSQL...");
+    let pool = db::create_pool(&database_url).await?;
+    db::run_migrations(&pool).await?;
+    tracing::info!("Database ready");
+
+    let state = Arc::new(AppState { pool });
 
     let cors = CorsLayer::new()
         .allow_origin(Any)

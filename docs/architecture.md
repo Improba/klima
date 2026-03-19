@@ -3,23 +3,28 @@
 ## Vue d'ensemble
 
 ```
-┌────────────────────────────────────────────────────────┐
-│                    Monorepo klima/                      │
-│                                                        │
-│  ┌──────────────────┐       ┌───────────────────────┐  │
-│  │    back/ (Rust)   │       │  front/ (Vue/Quasar)  │  │
-│  │                   │       │                       │  │
-│  │  Axum API :3000   │◄─────►│  Quasar Dev :9000     │  │
-│  │  ONNX Runtime     │ JSON  │  CesiumJS 3D          │  │
-│  │  SQLite           │       │                       │  │
-│  └──────────────────┘       └───────────────────────┘  │
-│           │                          │                  │
-│    back/docker/               front/docker/             │
-│    Dockerfile.dev             Dockerfile.dev            │
-│    docker-compose.dev.yml     docker-compose.dev.yml    │
-│                                                        │
-│  scripts/run-dev.sh → lance les deux containers         │
-└────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Monorepo klima/                               │
+│                                                                     │
+│  ┌──────────────────────┐       ┌────────────────────────────────┐  │
+│  │    back/ (Rust)       │       │     front/ (Vue/Quasar)        │  │
+│  │                       │       │                                │  │
+│  │  Axum API :3000       │◄─────►│  Quasar Dev :9000              │  │
+│  │  ONNX Runtime (FNO)   │ JSON  │  CesiumJS 3D                  │  │
+│  │  GeoJSON→Tensor       │       │  GeoJSON draw tools            │  │
+│  │  PostgreSQL (sqlx)    │       │                                │  │
+│  └──────────┬────────────┘       └────────────────────────────────┘  │
+│             │                                                        │
+│  ┌──────────▼────────────┐                                          │
+│  │   klima-db (Postgres)  │                                          │
+│  │   PostgreSQL 16 :5432  │                                          │
+│  └────────────────────────┘                                          │
+│                                                                     │
+│  training/  →  Python (PyTorch, NVIDIA Modulus, neuraloperator)      │
+│                Local-FNO + PINN  →  export .onnx                    │
+│                                                                     │
+│  scripts/run-dev.sh → lance les containers Docker                    │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Structure des dossiers
@@ -35,10 +40,10 @@ klima/
 │   │   │   ├── health.rs       # GET /api/health
 │   │   │   └── simulate.rs     # POST /api/simulate
 │   │   └── db/
-│   │       └── mod.rs          # SQLite (rusqlite)
+│   │       └── mod.rs          # PostgreSQL (sqlx + PgPool)
 │   └── docker/
 │       ├── Dockerfile.dev
-│       └── docker-compose.dev.yml
+│       └── docker-compose.dev.yml  # back + klima-db (PostgreSQL 16)
 │
 ├── front/                      # Frontend Vue.js
 │   ├── package.json
@@ -46,7 +51,6 @@ klima/
 │   ├── tsconfig.json
 │   ├── index.html
 │   ├── src/
-│   │   ├── main.ts
 │   │   ├── App.vue
 │   │   ├── boot/
 │   │   │   └── cesium.ts       # Config Cesium Ion token
@@ -68,9 +72,11 @@ klima/
 │       └── docker-compose.dev.yml
 │
 ├── docs/                       # Documentation
-│   ├── specification.md
-│   ├── architecture.md
-│   └── setup.md
+│   ├── specification.md        # Spec (FNO, PINN, GeoJSON-to-Tensor)
+│   ├── architecture.md         # Ce fichier
+│   ├── setup.md
+│   └── plans/
+│       └── implementation-plan.md
 │
 ├── scripts/
 │   └── run-dev.sh              # Lance l'env de dev Docker
@@ -79,18 +85,62 @@ klima/
 └── README.md
 ```
 
+## Stack technique
+
+| Couche | Technologie | Rôle |
+|--------|-------------|------|
+| Modèle IA | **Local-FNO** (Fourier Neural Operator) + contraintes PINN | Prédiction ΔT et v en temps réel, zero-shot super-résolution |
+| Entraînement | Python, PyTorch, NVIDIA Modulus / neuraloperator | Entraînement sur 24-50 sims CFD, export ONNX |
+| Backend | **Rust** — Axum, `ort` (ONNX Runtime), `sqlx` | API REST, inférence ONNX, pipeline GeoJSON→Tensor |
+| Base de données | **PostgreSQL 16** | Projets, scénarios, résultats (JSONB + BYTEA) |
+| Frontend | **Vue.js 3** — Quasar, CesiumJS | Interface 3D, outils de dessin GeoJSON, visualisation |
+| Infrastructure | Docker, Docker Compose | Conteneurisation de tous les services |
+
 ## Flux de données
 
-1. L'utilisateur interagit avec la carte CesiumJS (modifie la géométrie, ajuste les paramètres météo).
-2. Le frontend envoie un `POST /api/simulate` avec la géométrie et les paramètres.
-3. Le backend Rust transforme les données en tenseur, les passe au modèle ONNX.
-4. Le modèle retourne les matrices de température et flux d'air.
-5. Le backend renvoie les résultats au frontend en JSON compressé.
-6. Le frontend superpose les résultats sur CesiumJS (colorisation thermique, particules de vent).
+### Flux principal (simulation interactive)
+
+```
+  Utilisateur                    Frontend (CesiumJS)              Backend (Rust/Axum)
+      │                                │                                │
+      │ dessine un polygone            │                                │
+      │ (toit végétalisé)              │                                │
+      ├───────────────────────────────►│                                │
+      │                                │  GeoJSON + params météo        │
+      │                                ├───────────────────────────────►│
+      │                                │                                │ GeoJSON → Tensor
+      │                                │                                │ (rasterisation sur grille voxel)
+      │                                │                                │
+      │                                │                                │ Inférence FNO (ONNX)
+      │                                │                                │ ΔT + v en < 200 ms
+      │                                │                                │
+      │                                │  surface_temps + wind_field    │
+      │                                │◄───────────────────────────────┤
+      │  heatmap 3D + particules vent  │                                │
+      │◄───────────────────────────────┤                                │
+```
+
+### Flux zoom (super-résolution)
+
+```
+  Utilisateur zoome ×2            Frontend                          Backend
+      │                                │                                │
+      │                                │  bbox + résolution cible       │
+      │                                ├───────────────────────────────►│
+      │                                │                                │ FNO évalue sur grille 2×
+      │                                │                                │ (dynamic axes ONNX)
+      │                                │                                │ Zero-shot, pas de ré-entraînement
+      │                                │  résultat haute-résolution     │
+      │                                │◄───────────────────────────────┤
+      │  rendu détaillé                │                                │
+      │◄───────────────────────────────┤                                │
+```
 
 ## Communication inter-services (Docker)
 
-- Les deux containers partagent le réseau Docker `klima-net`.
-- Le frontend proxy les appels `/api/*` vers `http://klima-back:3000`.
-- Chaque container monte le code source du host via un volume partagé.
-- Les dépendances (node_modules, cargo registry, target) sont dans des volumes Docker nommés pour la performance.
+- 3 containers : `klima-back` (Rust), `klima-front` (Node), `klima-db` (PostgreSQL)
+- Réseau Docker `klima-net` partagé
+- Le backend se connecte à PostgreSQL via `DATABASE_URL=postgres://klima:klima@klima-db:5432/klima`
+- Le frontend proxy les appels `/api/*` vers `http://klima-back:3000`
+- Chaque container applicatif monte le code source du host via un volume partagé
+- PostgreSQL persiste ses données dans un volume Docker nommé `pgdata`
