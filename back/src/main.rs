@@ -1,4 +1,7 @@
+mod cache;
 mod db;
+mod error;
+mod inference;
 mod routes;
 
 use axum::Router;
@@ -8,8 +11,13 @@ use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
+use cache::SimulationCache;
+use inference::OnnxService;
+
 pub struct AppState {
     pub pool: PgPool,
+    pub onnx: OnnxService,
+    pub cache: SimulationCache,
 }
 
 #[tokio::main]
@@ -31,7 +39,22 @@ async fn main() -> anyhow::Result<()> {
     db::run_migrations(&pool).await?;
     tracing::info!("Database ready");
 
-    let state = Arc::new(AppState { pool });
+    let model_path = std::env::var("KLIMA_MODEL_PATH").ok();
+    let norm_path = std::env::var("KLIMA_NORM_PATH").ok();
+    let onnx = OnnxService::new(model_path.as_deref(), norm_path.as_deref());
+    if onnx.is_loaded() {
+        tracing::info!("ONNX inference service ready");
+    } else {
+        tracing::warn!("No ONNX model loaded — simulate endpoint will return mock data");
+    }
+
+    let cache_capacity: usize = std::env::var("KLIMA_CACHE_SIZE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(128);
+    let cache = SimulationCache::new(cache_capacity);
+
+    let state = Arc::new(AppState { pool, onnx, cache });
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
