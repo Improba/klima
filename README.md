@@ -6,12 +6,6 @@
 
 Visualisez et explorez l’impact thermique des aménagements (îlots de chaleur, flux d’air) via un modèle de substitution entraîné — une alternative rapide aux chaînes CFD classiques.
 
-<br/>
-
-<img src="docs/screenshots/hero.png" alt="Bannière Klima — microclimat urbain et visualisation 3D" width="100%" />
-
-<br/>
-
 [![Rust](https://img.shields.io/badge/API-Rust-CE422B?logo=rust&logoColor=white)](back/)
 [![Vue](https://img.shields.io/badge/UI-Vue%203-42b883?logo=vuedotjs&logoColor=white)](front/)
 [![Docker](https://img.shields.io/badge/dev-Docker-2496ED?logo=docker&logoColor=white)](./scripts/run.sh)
@@ -22,16 +16,6 @@ Visualisez et explorez l’impact thermique des aménagements (îlots de chaleur
 
 > **Statut : phase de test et de recherche**  
 > Klima est un **laboratoire logiciel** : l’API, l’interface et le pipeline modèle évoluent encore. Ce dépôt **ne constitue pas un produit fini** prêt pour la production. Les résultats de simulation peuvent être **indicatifs ou simulés** (données de secours sans modèle ONNX, comportements sujets à changement). Utilisez-le pour **expérimenter et contribuer**, pas comme référence métier figée.
-
----
-
-## Aperçu
-
-| Vue carte & scénario (illustration) | Projets & scénarios (illustration) |
-| :---: | :---: |
-| <img src="docs/screenshots/vue-3d.png" alt="Aperçu vue 3D type carte urbaine" width="420" /> | <img src="docs/screenshots/projets.png" alt="Aperçu liste de projets" width="420" /> |
-
-Les images ci-dessus sont des **visuels de présentation** pour le README ; remplacez-les par de vraies captures depuis l’app en cours d’exécution — voir [`docs/screenshots/README.md`](docs/screenshots/README.md).
 
 ---
 
@@ -80,7 +64,7 @@ cd klima
 klima/
 ├── back/           Rust / Axum — API + inférence ONNX + PostgreSQL
 ├── front/          Vue.js / Quasar / CesiumJS — interface 3D
-├── docs/           Documentation + captures (screenshots)
+├── docs/           Documentation
 ├── scripts/        Orchestration Docker
 └── README.md
 ```
