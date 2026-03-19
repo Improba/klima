@@ -1,0 +1,40 @@
+domain:
+  nx: 256
+  ny: 256
+  nz: 64
+  dx: 2.0  # meters
+
+model:
+  type: local_fno
+  modes: [16, 16, 8]
+  width: 64
+  num_layers: 4
+  in_channels: 15
+  out_channels: 4
+
+training:
+  batch_size: 2
+  epochs: 200
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  gradient_clip: 1.0
+  early_stopping_patience: 20
+  num_workers: 4
+  pin_memory: true
+
+loss:
+  lambda_temp: 1.0
+  lambda_wind: 1.0
+  lambda_div: 0.01
+  lambda_noslip: 10.0
+  lambda_diffusion: 0.1
+
+data:
+  hdf5_path: data/cfd_dataset.h5
+  normalize: true
+  augment: true
+
+logging:
+  tensorboard_dir: runs/
+  checkpoint_dir: checkpoints/
+  log_every: 10

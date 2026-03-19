@@ -1,0 +1,49 @@
+services:
+  klima-back:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dev
+    container_name: klima-back
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../:/app
+      - cargo-cache:/usr/local/cargo/registry
+      - target-cache:/app/target
+    environment:
+      - RUST_LOG=klima_api=debug,tower_http=debug
+      - DATABASE_URL=postgres://klima:klima@klima-db:5432/klima
+    depends_on:
+      klima-db:
+        condition: service_healthy
+    networks:
+      - klima-net
+
+  klima-db:
+    image: postgres:16-bookworm
+    container_name: klima-db
+    environment:
+      POSTGRES_DB: klima
+      POSTGRES_USER: klima
+      POSTGRES_PASSWORD: klima
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U klima"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - klima-net
+
+volumes:
+  cargo-cache:
+  target-cache:
+  pgdata:
+
+networks:
+  klima-net:
+    name: klima-net
+    external: true

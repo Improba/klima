@@ -1,0 +1,18 @@
+services:
+  klima-training:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    volumes:
+      - ../:/app
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    shm_size: "8g"
+    command: python -m training.src.model.train --config configs/default.yaml

@@ -1,0 +1,43 @@
+# === Rust (back/) ===
+back/target/
+**/*.rs.bk
+# === sqlx offline query data ===
+back/.sqlx/
+
+# === Node / Vue (front/) ===
+front/node_modules/
+front/dist/
+front/.quasar/
+front/src-capacitor/
+front/src-cordova/
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === Environment ===
+.env
+.env.local
+.env.*.local
+
+# === Docker ===
+docker-compose.override.yml
+
+# === Logs ===
+*.log
+npm-debug.log*
+
+# === ONNX models (large files) ===
+*.onnx
+
+# === Python (training scripts if any) ===
+__pycache__/
+*.py[cod]
+.venv/
