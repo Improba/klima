@@ -17,7 +17,14 @@ pub struct GeometryBlock {
     pub x: f64,
     pub y: f64,
     pub z: f64,
+    #[serde(alias = "surfaceType")]
     pub surface_type: String,
+}
+
+impl GeometryBlock {
+    pub fn position(&self) -> [f64; 3] {
+        [self.x, self.y, self.z]
+    }
 }
 
 #[derive(Serialize)]
@@ -40,9 +47,10 @@ async fn simulate(
         req.geometry.len()
     );
 
-    // TODO: Load ONNX model via `ort` and run inference
-    // For now, return a placeholder response
+    // TODO: load ONNX model via `ort` and run real inference
     let n = req.geometry.len();
+    let _positions: Vec<[f64; 3]> = req.geometry.iter().map(|b| b.position()).collect();
+    let _surfaces: Vec<&str> = req.geometry.iter().map(|b| b.surface_type.as_str()).collect();
     Json(SimulateResponse {
         status: "ok".into(),
         message: "Surrogate model not yet loaded — returning placeholder data".into(),

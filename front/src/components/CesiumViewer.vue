@@ -7,10 +7,10 @@ import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import {
   Viewer,
   Terrain,
+  Cartesian2,
   Cartesian3,
   createOsmBuildingsAsync,
   Math as CesiumMath,
-  Color,
   defined,
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
@@ -71,7 +71,7 @@ function setupClickHandler() {
   if (!viewer) return
 
   handler = new ScreenSpaceEventHandler(viewer.scene.canvas)
-  handler.setInputAction((event: { position: { x: number; y: number } }) => {
+  handler.setInputAction((event: { position: Cartesian2 }) => {
     if (!viewer) return
     const picked = viewer.scene.pick(event.position)
     if (defined(picked)) {

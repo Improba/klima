@@ -1,7 +1,7 @@
-import { configure } from 'quasar/wrappers'
+import { defineConfig } from '@quasar/app-vite/wrappers'
 import cesium from 'vite-plugin-cesium'
 
-export default configure(() => {
+export default defineConfig(() => {
   return {
     boot: ['cesium'],
 
