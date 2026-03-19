@@ -235,6 +235,23 @@ pub async fn get_simulation(
         .await
 }
 
+pub async fn list_simulations(
+    pool: &PgPool,
+    project_id: Uuid,
+    limit: i64,
+    offset: i64,
+) -> std::result::Result<Vec<Simulation>, sqlx::Error> {
+    sqlx::query_as::<_, Simulation>(
+        "SELECT id, project_id, scenario_id, params, result, status, created_at \
+         FROM simulations WHERE project_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+    )
+    .bind(project_id)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await
+}
+
 pub async fn update_simulation_result(
     pool: &PgPool,
     id: Uuid,

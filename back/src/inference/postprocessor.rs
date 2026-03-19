@@ -25,6 +25,11 @@ pub struct ResultMetadata {
     pub wind_subsample: [usize; 3],
     pub num_surface_points: usize,
     pub num_wind_samples: usize,
+    pub inference_time_ms: u64,
+    pub model_loaded: bool,
+    pub t_ambient: f64,
+    pub delta_t_range: [f64; 2],
+    pub wind_speed_range: [f64; 2],
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -39,13 +44,37 @@ pub struct SimulationResult {
 /// Expected shape: `[1, C, X, Y, Z]` with C >= 4.
 ///   channel 0 : ΔT  (temperature offset from ambient)
 ///   channels 1-3 : vx, vy, vz (wind velocity)
-pub fn postprocess(output_tensor: &ArrayD<f32>, t_ambient: f64) -> SimulationResult {
+pub fn postprocess(
+    output_tensor: &ArrayD<f32>,
+    t_ambient: f64,
+    inference_time_ms: u64,
+    model_loaded: bool,
+) -> SimulationResult {
     let shape = output_tensor.shape();
     let (nx, ny, nz) = if shape.len() == 5 {
         (shape[2], shape[3], shape[4])
     } else {
         (64, 64, 16)
     };
+
+    if nx == 0 || ny == 0 || nz == 0 {
+        return SimulationResult {
+            surface_temperatures: vec![],
+            wind_field: vec![],
+            metadata: ResultMetadata {
+                grid_resolution: [nx, ny, nz],
+                wind_subsample: [0, 0, 0],
+                num_surface_points: 0,
+                num_wind_samples: 0,
+                inference_time_ms,
+                model_loaded,
+                t_ambient,
+                delta_t_range: [0.0, 0.0],
+                wind_speed_range: [0.0, 0.0],
+            },
+        };
+    }
+
     let has_channels = shape.len() == 5 && shape[1] >= 4;
 
     let mut surface_temperatures = Vec::with_capacity(nx * ny);
@@ -101,12 +130,43 @@ pub fn postprocess(output_tensor: &ArrayD<f32>, t_ambient: f64) -> SimulationRes
         ix += step_x;
     }
 
+    let delta_t_range = if surface_temperatures.is_empty() {
+        [0.0, 0.0]
+    } else {
+        let mut min_dt = f64::MAX;
+        let mut max_dt = f64::MIN;
+        for st in &surface_temperatures {
+            let dt = st.temperature - t_ambient;
+            if dt < min_dt { min_dt = dt; }
+            if dt > max_dt { max_dt = dt; }
+        }
+        [min_dt, max_dt]
+    };
+
+    let wind_speed_range = if wind_field.is_empty() {
+        [0.0, 0.0]
+    } else {
+        let mut min_ws = f64::MAX;
+        let mut max_ws = f64::MIN;
+        for w in &wind_field {
+            let speed = (w.vx * w.vx + w.vy * w.vy + w.vz * w.vz).sqrt();
+            if speed < min_ws { min_ws = speed; }
+            if speed > max_ws { max_ws = speed; }
+        }
+        [min_ws, max_ws]
+    };
+
     SimulationResult {
         metadata: ResultMetadata {
             grid_resolution: [nx, ny, nz],
             wind_subsample: [target_wx.min(nx), target_wy.min(ny), target_wz.min(nz)],
             num_surface_points: surface_temperatures.len(),
             num_wind_samples: wind_field.len(),
+            inference_time_ms,
+            model_loaded,
+            t_ambient,
+            delta_t_range,
+            wind_speed_range,
         },
         surface_temperatures,
         wind_field,

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use std::time::Instant;
 use uuid::Uuid;
 
 use crate::db;
@@ -44,7 +45,9 @@ async fn simulate(
         return Ok(Json(cached));
     }
 
-    if !state.onnx.is_loaded() {
+    let model_loaded = state.onnx.is_loaded();
+
+    if !model_loaded {
         tracing::debug!("No ONNX model loaded — returning mock data");
         let mock = generate_mock_result(&req.geometry, t_ambient);
         state.cache.insert(&cache_key, mock.clone());
@@ -59,8 +62,11 @@ async fn simulate(
         t_ambient,
     );
 
-    let output = state.onnx.predict(tensor.into_dyn())?;
-    let result = postprocessor::postprocess(&output, t_ambient);
+    let start = Instant::now();
+    let output = state.onnx.predict(tensor.into_dyn()).await?;
+    let inference_time_ms = start.elapsed().as_millis() as u64;
+
+    let result = postprocessor::postprocess(&output, t_ambient, inference_time_ms, model_loaded);
 
     state.cache.insert(&cache_key, result.clone());
 
@@ -70,6 +76,7 @@ async fn simulate(
             "wind_direction": req.wind_direction,
             "sun_elevation": req.sun_elevation,
             "t_ambient": t_ambient,
+            "geometry": req.geometry,
         });
         let result_bytes = serde_json::to_vec(&result).unwrap_or_default();
         if let Ok(sim) =
@@ -117,6 +124,11 @@ fn generate_mock_result(geometry: &[GeometryBlock], t_ambient: f64) -> Simulatio
             wind_subsample: [64, 64, 16],
             num_surface_points: surface_temperatures.len(),
             num_wind_samples: wind_field.len(),
+            inference_time_ms: 0,
+            model_loaded: false,
+            t_ambient,
+            delta_t_range: [2.0, 2.0],
+            wind_speed_range: [1.0, 1.0],
         },
         surface_temperatures,
         wind_field,

@@ -1,7 +1,7 @@
 pub mod postprocessor;
 pub mod preprocessor;
 
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 
 use ndarray::{ArrayD, Axis};
 use ort::session::Session;
@@ -54,15 +54,13 @@ impl OnnxService {
         self.session.is_some()
     }
 
-    pub fn predict(&self, input: ArrayD<f32>) -> Result<ArrayD<f32>, AppError> {
+    pub async fn predict(&self, input: ArrayD<f32>) -> Result<ArrayD<f32>, AppError> {
         let session_mutex = self
             .session
             .as_ref()
             .ok_or_else(|| AppError::Internal("ONNX model not loaded".into()))?;
 
-        let mut session = session_mutex
-            .lock()
-            .map_err(|_| AppError::Internal("Session lock poisoned".into()))?;
+        let mut session = session_mutex.lock().await;
 
         let normalized = self.normalize_input(input);
 
