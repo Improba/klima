@@ -16,11 +16,13 @@ import {
   ScreenSpaceEventType,
 } from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
+import type { SimulationResult } from 'src/types'
 
 const props = defineProps<{
   windSpeed: number
   windDirection: number
   sunElevation: number
+  simulationResult?: SimulationResult | null
 }>()
 
 const cesiumContainer = ref<HTMLElement>()
