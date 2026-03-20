@@ -1,6 +1,25 @@
 name: klima
 
 services:
+  # PyTorch FNO inference (trained .pt + norm_params). Repo + checkpoints mounted read-only.
+  klima-infer:
+    build:
+      context: ../../training/infer_server
+      dockerfile: Dockerfile
+    container_name: klima-infer
+    ports:
+      - "8001:8000"
+    working_dir: /app/repo/training/infer_server
+    volumes:
+      - ../../:/app/repo:ro
+      - ../../training/checkpoints:/checkpoints:ro
+    environment:
+      - PYTHONPATH=/app/repo
+      - KLIMA_FNO_CHECKPOINT=/checkpoints/best_model.pt
+      - KLIMA_FNO_NORM=/checkpoints/norm_params.json
+    networks:
+      - klima-net
+
   klima-back:
     build:
       context: ..
@@ -17,6 +36,7 @@ services:
       - DATABASE_URL=postgres://klima:klima@klima-db:5432/klima
       - KLIMA_MODEL_PATH=/app/models/klima.onnx
       - KLIMA_NORM_PATH=/app/models/norm_params.json
+      - KLIMA_FNO_URL=http://klima-infer:8000
     depends_on:
       klima-db:
         condition: service_healthy

@@ -66,3 +66,7 @@ cp training/checkpoints/norm_params.json back/models/norm_params.json
 ```
 
 Voir `back/models/README.md` pour le détail et `training/src/model/export_onnx.py` (`dynamo=False` ; échec attendu sur le vrai FNO tant que l’export FFT n’existe pas).
+
+## Inférence PyTorch (checkpoint entraîné)
+
+Sidecar **`training/infer_server/`** : charge `best_model.pt` + `norm_params.json`, appelé par le backend via `KLIMA_FNO_URL` (service Docker `klima-infer`, port hôte **8001**). Voir [infer_server/README.md](infer_server/README.md).

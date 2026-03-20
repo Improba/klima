@@ -9,8 +9,10 @@ use uuid::Uuid;
 
 use crate::db;
 use crate::error::AppError;
+use crate::inference::fno_client;
 use crate::inference::postprocessor::{self, SimulationResult};
 use crate::inference::preprocessor::{self, GeometryBlock};
+use ndarray::ArrayD;
 use crate::AppState;
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -44,15 +46,6 @@ async fn simulate(
         return Ok(Json(cached));
     }
 
-    let model_loaded = state.onnx.is_loaded();
-
-    if !model_loaded {
-        tracing::debug!("No ONNX model loaded — returning mock data");
-        let mock = generate_mock_result(&req.geometry, t_ambient);
-        state.cache.insert(&cache_key, mock.clone());
-        return Ok(Json(mock));
-    }
-
     let tensor = preprocessor::preprocess_geometry(
         &req.geometry,
         req.wind_speed,
@@ -60,10 +53,38 @@ async fn simulate(
         req.sun_elevation,
         t_ambient,
     );
+    let tensor_dyn: ArrayD<f32> = tensor.into_dyn();
 
-    let start = Instant::now();
-    let output = state.onnx.predict(tensor.into_dyn()).await?;
-    let inference_time_ms = start.elapsed().as_millis() as u64;
+    let t_infer = Instant::now();
+    let mut output: Option<ArrayD<f32>> = None;
+    let mut model_loaded = false;
+
+    if let Some(url) = state.fno_infer_url.as_deref() {
+        match fno_client::predict(url, &tensor_dyn).await {
+            Ok(o) => {
+                output = Some(o);
+                model_loaded = true;
+            }
+            Err(e) => tracing::warn!(
+                "FNO sidecar inference failed ({}); trying ONNX or mock",
+                e
+            ),
+        }
+    }
+
+    let output = if let Some(o) = output {
+        o
+    } else if state.onnx.is_loaded() {
+        model_loaded = true;
+        state.onnx.predict(tensor_dyn).await?
+    } else {
+        tracing::debug!("No FNO URL success and no ONNX — returning mock data");
+        let mock = generate_mock_result(&req.geometry, t_ambient);
+        state.cache.insert(&cache_key, mock.clone());
+        return Ok(Json(mock));
+    };
+
+    let inference_time_ms = t_infer.elapsed().as_millis() as u64;
 
     let result = postprocessor::postprocess(&output, t_ambient, inference_time_ms, model_loaded);
 

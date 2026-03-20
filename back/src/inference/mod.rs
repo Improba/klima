@@ -1,3 +1,4 @@
+pub mod fno_client;
 pub mod postprocessor;
 pub mod preprocessor;
 

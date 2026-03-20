@@ -17,6 +17,8 @@ use inference::OnnxService;
 pub struct AppState {
     pub pool: PgPool,
     pub onnx: OnnxService,
+    /// When set (e.g. `http://klima-infer:8000`), `/simulate` tries PyTorch FNO sidecar first.
+    pub fno_infer_url: Option<String>,
     pub cache: SimulationCache,
 }
 
@@ -42,10 +44,17 @@ async fn main() -> anyhow::Result<()> {
     let model_path = std::env::var("KLIMA_MODEL_PATH").ok();
     let norm_path = std::env::var("KLIMA_NORM_PATH").ok();
     let onnx = OnnxService::new(model_path.as_deref(), norm_path.as_deref());
+    let fno_infer_url = std::env::var("KLIMA_FNO_URL")
+        .ok()
+        .filter(|s| !s.trim().is_empty());
+
+    if let Some(ref u) = fno_infer_url {
+        tracing::info!("FNO PyTorch sidecar URL: {} (tried before ONNX on /api/simulate)", u);
+    }
     if onnx.is_loaded() {
         tracing::info!("ONNX inference service ready");
-    } else {
-        tracing::warn!("No ONNX model loaded — simulate endpoint will return mock data");
+    } else if fno_infer_url.is_none() {
+        tracing::warn!("No ONNX model and no FNO URL — simulate will use mock data unless sidecar responds");
     }
 
     let cache_capacity: usize = std::env::var("KLIMA_CACHE_SIZE")
@@ -54,7 +63,12 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or(128);
     let cache = SimulationCache::new(cache_capacity);
 
-    let state = Arc::new(AppState { pool, onnx, cache });
+    let state = Arc::new(AppState {
+        pool,
+        onnx,
+        fno_infer_url,
+        cache,
+    });
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
