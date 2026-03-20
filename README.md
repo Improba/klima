@@ -19,15 +19,9 @@ Visualisez et explorez l’impact thermique des aménagements (îlots de chaleur
 
 ---
 
-## En bref
-
-- **Backend** : API Rust (Axum), inférence ONNX (`ort`), persistance PostgreSQL.  
-- **Frontend** : Vue 3, Quasar, globe / scène 3D avec CesiumJS.  
-- **IA** : approche type FNO / opérateurs neuronaux, export ONNX ; entraînement optionnel (Python, PyTorch, GPU).
-
----
-
 ## Stack technique
+
+Le monorepo couvre l’API et l’inférence, l’interface 3D et le pipeline d’entraînement du modèle.
 
 | Couche | Technologie |
 |--------|-------------|
@@ -62,8 +56,9 @@ cd klima
 
 ```
 klima/
-├── back/           Rust / Axum — API + inférence ONNX + PostgreSQL
-├── front/          Vue.js / Quasar / CesiumJS — interface 3D
+├── back/           API, inférence ONNX, PostgreSQL
+├── front/          Interface web et scène 3D
+├── training/       Entraînement du modèle (optionnel, voir training/README.md)
 ├── docs/           Documentation
 ├── scripts/        Orchestration Docker
 └── README.md
