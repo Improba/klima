@@ -28,7 +28,7 @@
 | Backend Rust/Axum | Squelette compilable, routes placeholder | `back/src/{main,routes/*,db/*}.rs` |
 | Frontend Vue/Quasar/CesiumJS | Squelette, viewer 3D avec OSM Buildings | `front/src/{components,layouts,pages}/*` |
 | Docker dev | Dockerfile + compose pour back et front | `{back,front}/docker/*` |
-| Script orchestrateur | `run.sh` (dev par défaut, down/logs/restart, `down` relaie les options) | `scripts/run.sh` |
+| Script orchestrateur | `run.sh` (dev, **dev-infer**, down/logs/restart/**restart-infer**) | `scripts/run.sh` |
 | Documentation | Spec, architecture, setup | `docs/*.md` |
 | Base de données | Schema PostgreSQL 16 (projects, simulations, scenarios) via sqlx | `back/src/db/mod.rs` |
 

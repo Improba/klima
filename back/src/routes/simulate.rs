@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::Instant;
+
+use ndarray::ArrayD;
 use uuid::Uuid;
 
 use crate::db;
@@ -12,7 +14,6 @@ use crate::error::AppError;
 use crate::inference::fno_client;
 use crate::inference::postprocessor::{self, SimulationResult};
 use crate::inference::preprocessor::{self, GeometryBlock};
-use ndarray::ArrayD;
 use crate::AppState;
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -60,7 +61,7 @@ async fn simulate(
     let mut model_loaded = false;
 
     if let Some(url) = state.fno_infer_url.as_deref() {
-        match fno_client::predict(url, &tensor_dyn).await {
+        match fno_client::predict(&state.http_client, url, &tensor_dyn).await {
             Ok(o) => {
                 output = Some(o);
                 model_loaded = true;

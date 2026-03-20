@@ -1,8 +1,10 @@
 name: klima
 
 services:
-  # PyTorch FNO inference (trained .pt + norm_params). Repo + checkpoints mounted read-only.
+  # PyTorch FNO inference (trained .pt + norm_params). Opt-in: profile "infer" or ./scripts/run.sh dev-infer
   klima-infer:
+    profiles:
+      - infer
     build:
       context: ../../training/infer_server
       dockerfile: Dockerfile
@@ -32,11 +34,14 @@ services:
       - cargo-cache:/usr/local/cargo/registry
       - target-cache:/app/target
     environment:
-      - RUST_LOG=klima_api=debug,tower_http=debug
-      - DATABASE_URL=postgres://klima:klima@klima-db:5432/klima
-      - KLIMA_MODEL_PATH=/app/models/klima.onnx
-      - KLIMA_NORM_PATH=/app/models/norm_params.json
-      - KLIMA_FNO_URL=http://klima-infer:8000
+      - RUST_LOG=${RUST_LOG:-klima_api=debug,tower_http=debug}
+      - DATABASE_URL=${DATABASE_URL:-postgres://klima:klima@klima-db:5432/klima}
+      # ONNX mock ou graphe réel sous back/models/ (voir back/models/README.md)
+      - KLIMA_MODEL_PATH=${KLIMA_MODEL_PATH:-/app/models/klima.onnx}
+      - KLIMA_NORM_PATH=${KLIMA_NORM_PATH:-/app/models/norm_params.json}
+      # Vide par défaut : pas d’appel HTTP au sidecar → ONNX puis mock. Avec profile infer : ./scripts/run.sh dev-infer
+      - KLIMA_FNO_URL=${KLIMA_FNO_URL:-}
+      - KLIMA_CACHE_SIZE=${KLIMA_CACHE_SIZE:-128}
     depends_on:
       klima-db:
         condition: service_healthy

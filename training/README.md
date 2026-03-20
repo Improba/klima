@@ -69,4 +69,4 @@ Voir `back/models/README.md` pour le détail et `training/src/model/export_onnx.
 
 ## Inférence PyTorch (checkpoint entraîné)
 
-Sidecar **`training/infer_server/`** : charge `best_model.pt` + `norm_params.json`, appelé par le backend via `KLIMA_FNO_URL` (service Docker `klima-infer`, port hôte **8001**). Voir [infer_server/README.md](infer_server/README.md).
+Sidecar **`training/infer_server/`** : charge `best_model.pt` + `norm_params.json`. Démarrage avec **`./scripts/run.sh dev-infer`** (fixe `KLIMA_FNO_URL` ; service `klima-infer`, port hôte **8001**). Voir [infer_server/README.md](infer_server/README.md).

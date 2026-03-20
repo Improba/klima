@@ -10,7 +10,7 @@
 │  │    back/ (Rust)       │       │     front/ (Vue/Quasar)        │  │
 │  │                       │       │                                │  │
 │  │  Axum API :3000       │◄─────►│  Quasar Dev :9000              │  │
-│  │  ONNX Runtime (FNO)   │ JSON  │  CesiumJS 3D                  │  │
+│  │  FNO sidecar / ONNX   │ JSON  │  CesiumJS 3D                  │  │
 │  │  GeoJSON→Tensor       │       │  GeoJSON draw tools            │  │
 │  │  PostgreSQL (sqlx)    │       │                                │  │
 │  └──────────┬────────────┘       └────────────────────────────────┘  │
@@ -20,10 +20,10 @@
 │  │   PostgreSQL 16 :5432  │                                          │
 │  └────────────────────────┘                                          │
 │                                                                     │
-│  training/  →  Python (PyTorch, NVIDIA Modulus, neuraloperator)      │
-│                Local-FNO + PINN  →  export .onnx                    │
+│  training/  →  Python (PyTorch) : entraînement + infer_server (FNO .pt) │
+│                ONNX optionnel (mock si FFT non exportable)            │
 │                                                                     │
-│  scripts/run.sh → lance back + front + DB (projet Compose `klima`)   │
+│  scripts/run.sh → back + front + DB (+ optionnel `klima-infer` FNO)   │
 │  training/docker → entraînement GPU optionnel (projet `klima-training`) │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -45,7 +45,7 @@ klima/
 │   │       └── mod.rs          # PostgreSQL (sqlx + PgPool)
 │   └── docker/
 │       ├── Dockerfile.dev
-│       └── docker-compose.dev.yml  # back + klima-db (PostgreSQL 16)
+│       └── docker-compose.dev.yml  # back + db (+ optionnel klima-infer)
 │
 ├── front/                      # Frontend Vue.js
 │   ├── package.json
@@ -78,6 +78,7 @@ klima/
 │   ├── docker/
 │   │   ├── Dockerfile          # PyTorch CUDA
 │   │   └── docker-compose.yml  # Projet Compose `klima-training`
+│   ├── infer_server/           # Sidecar FastAPI FNO (wire binaire KLM1)
 │   ├── src/
 │   └── README.md
 │
@@ -89,7 +90,7 @@ klima/
 │       └── implementation-plan.md
 │
 ├── scripts/
-│   └── run.sh                  # Lance l'env de dev Docker (back + front + DB)
+│   └── run.sh                  # Dev Docker (back + front + DB) ; dev-infer + sidecar FNO
 │
 ├── .gitignore
 └── README.md
@@ -100,8 +101,8 @@ klima/
 | Couche | Technologie | Rôle |
 |--------|-------------|------|
 | Modèle IA | **Local-FNO** (Fourier Neural Operator) + contraintes PINN | Prédiction ΔT et v en temps réel, zero-shot super-résolution |
-| Entraînement | Python, PyTorch, NVIDIA Modulus / neuraloperator | Entraînement sur 24-50 sims CFD, export ONNX |
-| Backend | **Rust** — Axum, `ort` (ONNX Runtime), `sqlx` | API REST, inférence ONNX, pipeline GeoJSON→Tensor |
+| Entraînement | Python, PyTorch | Entraînement FNO ; inférence via **infer_server** ou export ONNX si possible |
+| Backend | **Rust** — Axum, `ort` (ONNX Runtime), `reqwest`, `sqlx` | API REST ; chaîne **FNO (HTTP) → ONNX → mock**, pipeline GeoJSON→Tensor |
 | Base de données | **PostgreSQL 16** | Projets, scénarios, résultats (JSONB + BYTEA) |
 | Frontend | **Vue.js 3** — Quasar, CesiumJS | Interface 3D, outils de dessin GeoJSON, visualisation |
 | Infrastructure | Docker, Docker Compose | Conteneurisation de tous les services |
@@ -121,8 +122,8 @@ klima/
       │                                │                                │ GeoJSON → Tensor
       │                                │                                │ (rasterisation sur grille voxel)
       │                                │                                │
-      │                                │                                │ Inférence FNO (ONNX)
-      │                                │                                │ ΔT + v en < 200 ms
+│                                │                                │ FNO sidecar PyTorch, sinon ONNX, sinon mock
+│                                │                                │ ΔT + v (latence selon modèle)
       │                                │                                │
       │                                │  surface_temps + wind_field    │
       │                                │◄───────────────────────────────┤
@@ -150,9 +151,10 @@ klima/
 
 ### Application (développement)
 
-- 3 containers : `klima-back` (Rust), `klima-front` (Node), `klima-db` (PostgreSQL)
+- Containers : `klima-back` (Rust), `klima-front` (Node), `klima-db` (PostgreSQL). **`klima-infer`** (FastAPI + PyTorch) est optionnel : profil Compose `infer`, démarré par **`./scripts/run.sh dev-infer`** (pas par `./scripts/run.sh` seul).
 - Réseau Docker `klima-net` partagé
 - Le backend se connecte à PostgreSQL via `DATABASE_URL=postgres://klima:klima@klima-db:5432/klima`
+- Inférence simulation : si `KLIMA_FNO_URL` est défini (ex. après `dev-infer`), `/api/simulate` appelle d’abord le sidecar ; sinon **ONNX** puis **mock**. Par défaut le dev standard ne définit pas `KLIMA_FNO_URL`.
 - Le frontend proxy les appels `/api/*` vers `http://klima-back:3000`
 - Chaque container applicatif monte le code source du host via un volume partagé
 - PostgreSQL persiste ses données dans un volume Docker nommé `pgdata`

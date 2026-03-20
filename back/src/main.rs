@@ -4,10 +4,12 @@ mod error;
 mod inference;
 mod routes;
 
-use axum::Router;
-use sqlx::PgPool;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
+
+use axum::Router;
+use sqlx::PgPool;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
@@ -19,6 +21,8 @@ pub struct AppState {
     pub onnx: OnnxService,
     /// When set (e.g. `http://klima-infer:8000`), `/simulate` tries PyTorch FNO sidecar first.
     pub fno_infer_url: Option<String>,
+    /// Shared client for FNO sidecar (connection pooling, timeout).
+    pub http_client: reqwest::Client,
     pub cache: SimulationCache,
 }
 
@@ -50,11 +54,14 @@ async fn main() -> anyhow::Result<()> {
 
     if let Some(ref u) = fno_infer_url {
         tracing::info!("FNO PyTorch sidecar URL: {} (tried before ONNX on /api/simulate)", u);
+        if !onnx.is_loaded() {
+            tracing::info!("No ONNX model loaded — /api/simulate relies on sidecar or falls back to mock");
+        }
     }
     if onnx.is_loaded() {
         tracing::info!("ONNX inference service ready");
     } else if fno_infer_url.is_none() {
-        tracing::warn!("No ONNX model and no FNO URL — simulate will use mock data unless sidecar responds");
+        tracing::warn!("No ONNX model and no FNO URL — simulate will use mock data");
     }
 
     let cache_capacity: usize = std::env::var("KLIMA_CACHE_SIZE")
@@ -63,10 +70,16 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or(128);
     let cache = SimulationCache::new(cache_capacity);
 
+    let http_client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(300))
+        .build()?;
+
     let state = Arc::new(AppState {
         pool,
         onnx,
         fno_infer_url,
+        http_client,
         cache,
     });
 

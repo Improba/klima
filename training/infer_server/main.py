@@ -74,7 +74,8 @@ def _encode_response(arr: np.ndarray) -> bytes:
     shape = arr.shape
     ndim = len(shape)
     header = struct.pack("<II", MAGIC, ndim)
-    header += struct.pack(f"<{ndim}I", *shape)
+    # u32 LE per dim (matches Rust fno_client)
+    header += struct.pack(f"<{ndim}I", *[int(x) for x in shape])
     return header + arr.astype(np.float32, copy=False).tobytes()
 
 
@@ -110,9 +111,25 @@ async def lifespan(app: FastAPI):
     model.eval()
     _state["model"] = model
     _state["device"] = device
-    _state["norm"] = _load_norm(norm_path)
-    if _state["norm"] is None:
-        print(f"[infer] Warning: no norm params at {norm_path}")
+
+    norm_source: Optional[Path] = None
+    norm = _load_norm(norm_path)
+    if norm is not None:
+        norm_source = norm_path
+    else:
+        sibling = ckpt_file.parent / "norm_params.json"
+        norm = _load_norm(sibling)
+        if norm is not None:
+            norm_source = sibling
+            print(f"[infer] Loaded norm from checkpoint dir: {sibling}")
+    _state["norm"] = norm
+    if norm is None:
+        print(
+            "[infer] No norm_params — /predict returns 503 "
+            f"(set KLIMA_FNO_NORM or place norm_params.json next to {ckpt_path})"
+        )
+    else:
+        print(f"[infer] Normalisation: {norm_source}")
 
     print(f"[infer] Loaded FNO from {ckpt_path} on {device}")
     yield
@@ -123,8 +140,18 @@ app = FastAPI(title="Klima FNO infer", lifespan=lifespan)
 
 @app.get("/health")
 def health():
-    ok = _state.get("model") is not None
-    return {"status": "ok" if ok else "no_model", "device": str(_state.get("device", ""))}
+    model = _state.get("model")
+    norm = _state.get("norm")
+    if model is None:
+        status = "no_model"
+    elif norm is None:
+        status = "no_norm"
+    else:
+        status = "ok"
+    return {
+        "status": status,
+        "device": str(_state.get("device", "")),
+    }
 
 
 @app.post("/predict")
@@ -139,16 +166,19 @@ async def predict(request: Request) -> Response:
     except ValueError as e:
         return PlainTextResponse(str(e), status_code=400)
 
-    device = _state["device"]
     norm = _state["norm"]
+    if norm is None:
+        return PlainTextResponse(
+            "norm_params required (trained model expects z-score input/output)",
+            status_code=503,
+        )
 
+    device = _state["device"]
     x = torch.from_numpy(arr.copy()).to(device)
     with torch.no_grad():
-        if norm is not None:
-            x = _normalize(x, norm)
+        x = _normalize(x, norm)
         y = model(x)
-        if norm is not None:
-            y = _denormalize(y, norm)
+        y = _denormalize(y, norm)
     out_np = y.detach().cpu().numpy().astype(np.float32)
     payload = _encode_response(out_np)
     return Response(content=payload, media_type="application/octet-stream")

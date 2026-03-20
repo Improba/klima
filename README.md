@@ -48,7 +48,7 @@ cd klima
 | API (backend) | http://localhost:3000 |
 | Interface web | http://localhost:9000 |
 
-**Optionnel** : token Cesium Ion pour les bâtiments 3D Cesium OSM (`CESIUM_ION_TOKEN=… ./scripts/run.sh`, transmis au front comme `VITE_CESIUM_ION_TOKEN`). Sans token, la carte reste utilisable avec fond sombre et imagerie OpenStreetMap (pas de ciel étoilé par défaut).
+**Optionnel** : copier `.env.example` vers **`.env`** à la racine et y mettre `CESIUM_ION_TOKEN` (le script `run.sh` charge ce fichier). Ou **`./scripts/run.sh dev-infer`** pour le sidecar PyTorch FNO (port 8001) en plus de l’API. Sans token Cesium, la carte reste utilisable (OSM + globe sombre).
 
 ---
 
@@ -74,11 +74,13 @@ docker exec -it klima-back  bash   # cargo, etc.
 docker exec -it klima-front bash   # npm, quasar, etc.
 
 # Cycle de vie
-./scripts/run.sh              # Démarrer (dev)
+./scripts/run.sh              # Démarrer (DB + API + UI, sans sidecar FNO)
+./scripts/run.sh dev-infer    # + sidecar PyTorch FNO (localhost:8001)
 ./scripts/run.sh down         # Arrêter
 ./scripts/run.sh down -v      # Arrêter + volumes
 ./scripts/run.sh logs         # Logs
 ./scripts/run.sh restart      # Redémarrer
+./scripts/run.sh restart-infer # Redémarrer avec FNO
 
 # Entraînement ML (optionnel, GPU — stack Compose séparée, voir training/README.md)
 # cd training/docker && docker compose up --build

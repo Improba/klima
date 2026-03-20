@@ -1,5 +1,7 @@
 //! Binary HTTP client for the PyTorch FNO sidecar (`training/infer_server`).
 //!
+//! Use a shared [`reqwest::Client`] from [`crate::AppState`] (timeouts + connection reuse).
+//!
 //! Wire format: `KLM1` magic (u32 LE), `ndim` (u32 LE), `ndim` shape values (u32 LE each),
 //! then raw `f32` row-major tensor data (C-contiguous, same layout as ndarray).
 
@@ -79,16 +81,13 @@ fn decode_tensor(body: &[u8]) -> Result<ArrayD<f32>, AppError> {
 }
 
 /// Run remote FNO inference. `base_url` is e.g. `http://klima-infer:8000` (no trailing slash).
-pub async fn predict(base_url: &str, input: &ArrayD<f32>) -> Result<ArrayD<f32>, AppError> {
-    let url = format!(
-        "{}/predict",
-        base_url.trim_end_matches('/')
-    );
+pub async fn predict(
+    client: &reqwest::Client,
+    base_url: &str,
+    input: &ArrayD<f32>,
+) -> Result<ArrayD<f32>, AppError> {
+    let url = format!("{}/predict", base_url.trim_end_matches('/'));
     let payload = encode_tensor(input)?;
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(300))
-        .build()
-        .map_err(|e| AppError::Internal(format!("reqwest client: {e}")))?;
 
     let resp = client
         .post(&url)
