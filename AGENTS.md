@@ -32,6 +32,10 @@ Docker must be started manually in the Cloud VM since there's no systemd. After 
 - **Cesium Ion token**: Optional. The map uses OpenStreetMap imagery on a dark globe without a starfield. Pass `CESIUM_ION_TOKEN` (or `VITE_CESIUM_ION_TOKEN` for the frontend build) to enable Cesium OSM 3D Buildings via Ion: `CESIUM_ION_TOKEN=xxx ./scripts/run.sh`
 - **Frontend proxy**: The frontend dev server proxies `/api/*` to `http://klima-back:3000` via Docker networking. For local (non-Docker) testing, use `VITE_API_BASE_URL=http://localhost:3000`.
 
+### Database schema
+
+Versioned SQL migrations live in `back/migrations/` and run at startup via `sqlx::migrate!` (embedded at compile time). Add new files as `back/migrations/<timestamp>_<name>.sql`; existing databases pick up only pending revisions.
+
 ### Lint / Test / Build
 
 | Check | Command |

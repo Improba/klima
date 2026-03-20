@@ -2,8 +2,7 @@ use axum::extract::State;
 use axum::routing::post;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::Instant;
 use uuid::Uuid;
@@ -14,7 +13,7 @@ use crate::inference::postprocessor::{self, SimulationResult};
 use crate::inference::preprocessor::{self, GeometryBlock};
 use crate::AppState;
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct SimulateRequest {
     pub project_id: Option<Uuid>,
     pub scenario_id: Option<Uuid>,
@@ -39,7 +38,7 @@ async fn simulate(
         req.geometry.len()
     );
 
-    let cache_key = compute_cache_key(&req);
+    let cache_key = simulation_cache_key(&req);
     if let Some(cached) = state.cache.get(&cache_key) {
         tracing::debug!("Cache hit for key {}", cache_key);
         return Ok(Json(cached));
@@ -91,11 +90,45 @@ async fn simulate(
     Ok(Json(result))
 }
 
-fn compute_cache_key(req: &SimulateRequest) -> String {
-    let mut hasher = DefaultHasher::new();
-    let json = serde_json::to_string(req).unwrap_or_default();
-    json.hash(&mut hasher);
-    format!("{:x}", hasher.finish())
+/// Cache key from physics + geometry only (not `project_id` / `scenario_id`).
+/// Geometry order is normalized (index sort, no full geometry clone). Preimage is
+/// SHA-256 over little-endian scalars + UTF-8 surface types for stable keys across Rust versions.
+fn simulation_cache_key(req: &SimulateRequest) -> String {
+    let t_ambient = req.t_ambient.unwrap_or(20.0);
+    let mut order: Vec<usize> = (0..req.geometry.len()).collect();
+    order.sort_by(|&i, &j| {
+        let a = &req.geometry[i];
+        let b = &req.geometry[j];
+        a.x
+            .total_cmp(&b.x)
+            .then_with(|| a.y.total_cmp(&b.y))
+            .then_with(|| a.z.total_cmp(&b.z))
+            .then_with(|| a.surface_type.cmp(&b.surface_type))
+    });
+
+    let mut buf = Vec::new();
+    cache_push_f64(&mut buf, req.wind_speed);
+    cache_push_f64(&mut buf, req.wind_direction);
+    cache_push_f64(&mut buf, req.sun_elevation);
+    cache_push_f64(&mut buf, t_ambient);
+    for &i in &order {
+        let b = &req.geometry[i];
+        cache_push_f64(&mut buf, b.x);
+        cache_push_f64(&mut buf, b.y);
+        cache_push_f64(&mut buf, b.z);
+        cache_push_str(&mut buf, &b.surface_type);
+    }
+    format!("{:x}", Sha256::digest(&buf))
+}
+
+fn cache_push_f64(buf: &mut Vec<u8>, v: f64) {
+    buf.extend_from_slice(&v.to_le_bytes());
+}
+
+fn cache_push_str(buf: &mut Vec<u8>, s: &str) {
+    let b = s.as_bytes();
+    buf.extend_from_slice(&(b.len() as u64).to_le_bytes());
+    buf.extend_from_slice(b);
 }
 
 /// Must match `ORIGIN_*` and `CELL_SIZE_DEG` in `front/src/composables/useThermalOverlay.ts`
@@ -171,4 +204,52 @@ fn generate_mock_result(geometry: &[GeometryBlock], t_ambient: f64) -> Simulatio
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new().route("/simulate", post(simulate))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    fn sample_block(x: f64, y: f64, z: f64) -> GeometryBlock {
+        GeometryBlock {
+            x,
+            y,
+            z,
+            surface_type: "batiment".into(),
+        }
+    }
+
+    #[test]
+    fn cache_key_ignores_project_and_scenario_ids() {
+        let a = SimulateRequest {
+            project_id: Some(Uuid::nil()),
+            scenario_id: None,
+            wind_speed: 2.0,
+            wind_direction: 180.0,
+            sun_elevation: 45.0,
+            t_ambient: Some(19.0),
+            geometry: vec![sample_block(1.0, 2.0, 0.0)],
+        };
+        let mut b = a.clone();
+        b.project_id = None;
+        b.scenario_id = Some(Uuid::nil());
+        assert_eq!(simulation_cache_key(&a), simulation_cache_key(&b));
+    }
+
+    #[test]
+    fn cache_key_stable_under_geometry_permutation() {
+        let a = SimulateRequest {
+            project_id: None,
+            scenario_id: None,
+            wind_speed: 1.0,
+            wind_direction: 0.0,
+            sun_elevation: 10.0,
+            t_ambient: None,
+            geometry: vec![sample_block(0.0, 1.0, 0.0), sample_block(1.0, 0.0, 0.0)],
+        };
+        let mut b = a.clone();
+        b.geometry.reverse();
+        assert_eq!(simulation_cache_key(&a), simulation_cache_key(&b));
+    }
 }

@@ -172,3 +172,31 @@ pub fn postprocess(
         wind_field,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::Array5;
+
+    #[test]
+    fn postprocess_reads_delta_t_at_ground_slice() {
+        let mut t = Array5::<f32>::zeros((1, 4, 4, 4, 4));
+        t[[0, 0, 1, 2, 0]] = 3.5;
+        let r = postprocess(&t.into_dyn(), 20.0, 42, true);
+        assert_eq!(r.surface_temperatures.len(), 16);
+        let st = &r.surface_temperatures[1 * 4 + 2];
+        assert!((st.lon - 1.0).abs() < 1e-9);
+        assert!((st.lat - 2.0).abs() < 1e-9);
+        assert!((st.temperature - 23.5).abs() < 1e-5);
+        assert_eq!(r.metadata.inference_time_ms, 42);
+        assert!(r.metadata.model_loaded);
+    }
+
+    #[test]
+    fn postprocess_empty_shape_returns_empty_vectors() {
+        let t = Array5::<f32>::zeros((1, 4, 4, 0, 4));
+        let r = postprocess(&t.into_dyn(), 10.0, 0, false);
+        assert!(r.surface_temperatures.is_empty());
+        assert!(r.wind_field.is_empty());
+    }
+}

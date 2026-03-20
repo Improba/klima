@@ -34,6 +34,7 @@
 klima/
 ├── back/                       # Backend Rust
 │   ├── Cargo.toml
+│   ├── migrations/             # Schéma PostgreSQL (sqlx migrate)
 │   ├── src/
 │   │   ├── main.rs             # Point d'entrée, serveur Axum
 │   │   ├── routes/

@@ -48,44 +48,7 @@ pub async fn create_pool(database_url: &str) -> Result<PgPool> {
 }
 
 pub async fn run_migrations(pool: &PgPool) -> Result<()> {
-    sqlx::raw_sql(
-        "
-        CREATE TABLE IF NOT EXISTS projects (
-            id          UUID PRIMARY KEY,
-            name        TEXT NOT NULL,
-            description TEXT,
-            created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-            updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-
-        CREATE TABLE IF NOT EXISTS scenarios (
-            id          UUID PRIMARY KEY,
-            project_id  UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-            name        TEXT NOT NULL,
-            geometry    JSONB NOT NULL,
-            metadata    JSONB,
-            created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-
-        CREATE TABLE IF NOT EXISTS simulations (
-            id          UUID PRIMARY KEY,
-            project_id  UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-            scenario_id UUID REFERENCES scenarios(id) ON DELETE SET NULL,
-            params      JSONB NOT NULL,
-            result      BYTEA,
-            status      TEXT NOT NULL DEFAULT 'pending',
-            created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-        ",
-    )
-    .execute(pool)
-    .await?;
-
-    // Existing DBs may have been created with `description NOT NULL`; keep the column optional.
-    let _ = sqlx::query("ALTER TABLE projects ALTER COLUMN description DROP NOT NULL")
-        .execute(pool)
-        .await;
-
+    sqlx::migrate!("./migrations").run(pool).await?;
     Ok(())
 }
 

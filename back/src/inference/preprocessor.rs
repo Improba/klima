@@ -121,3 +121,43 @@ fn surface_physical_props(surface_type: &str) -> (f32, f32, f32) {
         _ => (0.3, 0.90, 0.02),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_geometry_fills_broadcast_channels() {
+        let t = preprocess_geometry(&[], 5.0, 90.0, 30.0, 18.0);
+        assert_eq!(t.shape(), &[1, 15, 256, 256, 64]);
+        let wind_rad = 90f64.to_radians();
+        assert!((t[[0, 10, 10, 10, 10]] - 5.0).abs() < 1e-6);
+        assert!((t[[0, 11, 0, 0, 0]] - wind_rad.sin() as f32).abs() < 1e-5);
+        assert!((t[[0, 12, 0, 0, 0]] - wind_rad.cos() as f32).abs() < 1e-5);
+        assert!((t[[0, 13, 0, 0, 0]] - 30.0).abs() < 1e-6);
+        assert!((t[[0, 14, 0, 0, 0]] - 18.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn block_sets_occupancy_and_surface_one_hot() {
+        let g = [GeometryBlock {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            surface_type: "bitume".into(),
+        }];
+        let t = preprocess_geometry(&g, 1.0, 0.0, 0.0, 20.0);
+        assert_eq!(t[[0, 0, 0, 0, 0]], 1.0);
+        assert_eq!(t[[0, 1, 0, 0, 0]], 1.0);
+        for c in 2..=6 {
+            assert_eq!(t[[0, c, 0, 0, 0]], 0.0, "ch {}", c);
+        }
+        assert!((t[[0, 7, 0, 0, 0]] - 0.1).abs() < 1e-6);
+    }
+
+    #[test]
+    fn surface_type_index_maps_aliases() {
+        assert_eq!(surface_type_index("asphalt"), surface_type_index("bitume"));
+        assert_eq!(surface_type_index("grass"), surface_type_index("herbe"));
+    }
+}

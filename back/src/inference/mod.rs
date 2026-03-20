@@ -38,16 +38,43 @@ impl OnnxService {
             }
         });
 
+        let norm_path = norm_path.filter(|p| !p.is_empty());
+        let norm_explicit = norm_path.is_some();
+
         let norm_params = norm_path.and_then(|path| {
-            std::fs::read_to_string(path)
-                .ok()
-                .and_then(|c| serde_json::from_str(&c).ok())
+            match std::fs::read_to_string(path) {
+                Ok(c) => match serde_json::from_str::<NormParams>(&c) {
+                    Ok(p) => Some(p),
+                    Err(e) => {
+                        tracing::warn!(
+                            "Invalid norm_params.json at {}: {} — inference will skip normalization for those stats",
+                            path,
+                            e
+                        );
+                        None
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!(
+                        "Could not read norm params at {}: {} — inference will skip normalization for those stats",
+                        path,
+                        e
+                    );
+                    None
+                }
+            }
         });
 
-        Self {
+        let out = Self {
             session,
             norm_params,
+        };
+        if out.session.is_some() && out.norm_params.is_none() && !norm_explicit {
+            tracing::warn!(
+                "ONNX model loaded without KLIMA_NORM_PATH — set it for channel-wise normalization (recommended for trained checkpoints)"
+            );
         }
+        out
     }
 
     pub fn is_loaded(&self) -> bool {
