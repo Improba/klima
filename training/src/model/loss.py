@@ -193,7 +193,8 @@ class PINNLoss(nn.Module):
         # Term 5: Steady-state heat equation residual: α∇²T ≈ 0 at surfaces
         lap_t = laplacian_3d(pred_temp, self.dx)
         diffusion_residual = alpha_field * lap_t
-        loss_diffusion = (diffusion_residual[mask_surface.expand_as(diffusion_residual)] ** 2).mean()
+        surf = mask_surface.expand_as(diffusion_residual) > 0.5
+        loss_diffusion = (diffusion_residual[surf] ** 2).mean() if surf.any() else diffusion_residual.new_tensor(0.0)
 
         total = (
             self.lambda_temp * loss_temp

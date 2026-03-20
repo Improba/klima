@@ -15,7 +15,7 @@ from typing import Any, Dict
 
 import torch
 import yaml
-from torch.cuda.amp import GradScaler, autocast
+from torch import amp
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
@@ -98,7 +98,9 @@ def train(config: Dict[str, Any]) -> None:
         epochs=tc["epochs"],
         steps_per_epoch=len(train_loader),
     )
-    scaler = GradScaler()
+    # FNO spectral conv uses complex einsum — not supported in fp16 autocast on CUDA.
+    use_amp = device.type == "cuda" and tc.get("use_amp", False)
+    scaler = amp.GradScaler("cuda", enabled=use_amp)
 
     # --- Logging ---
     log_cfg = config.get("logging", {})
@@ -128,16 +130,28 @@ def train(config: Dict[str, Any]) -> None:
 
             optimizer.zero_grad(set_to_none=True)
 
-            with autocast(device_type=device.type):
+            if use_amp:
+                with amp.autocast("cuda"):
+                    pred = model(inp)
+                    losses = criterion(
+                        pred, tgt, mask_air, mask_solid, mask_surface, alpha_field
+                    )
+                    loss = losses["total"]
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), tc["gradient_clip"])
+                scaler.step(optimizer)
+                scaler.update()
+            else:
                 pred = model(inp)
-                losses = criterion(pred, tgt, mask_air, mask_solid, mask_surface, alpha_field)
+                losses = criterion(
+                    pred, tgt, mask_air, mask_solid, mask_surface, alpha_field
+                )
                 loss = losses["total"]
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), tc["gradient_clip"])
+                optimizer.step()
 
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), tc["gradient_clip"])
-            scaler.step(optimizer)
-            scaler.update()
             scheduler.step()
 
             epoch_loss += loss.item()

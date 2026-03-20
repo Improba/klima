@@ -93,3 +93,5 @@ cd training/docker && docker compose up --build
 ```
 
 Le dépôt entier est monté dans le conteneur (`PYTHONPATH` = racine du monorepo, répertoire de travail = `training/`). Détail des prérequis données, export ONNX et dépannage `runtime: nvidia` : [training/README.md](../training/README.md).
+
+Pour un **jeu de données local sans CFD** (Laplace + vent divergence nulle, voir doc du module), suivre la section *Données synthétiques* du même README ; les fichiers `.h5`, checkpoints et runs restent ignorés par Git.

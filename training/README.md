@@ -11,6 +11,33 @@ pip install -r training/requirements.txt
 PYTHONPATH=. python -m training.src.model.train --config training/configs/default.yaml
 ```
 
+`default.yaml` expects a real CFD dataset at `training/data/cfd_dataset.h5`. For **local experiments without OpenFOAM**, use the synthetic pipeline below.
+
+## Données synthétiques (physique explicite, hors CFD)
+
+Le module `training/src/data/synthetic_physics.py` construit des paires entrée/sortie compatibles avec le chargeur HDF5 :
+
+- **Température** : Laplace ∇²*T* = 0 dans l’air, températures imposées dans les solides et sur le pourtour du domaine (conductif stationnaire simplifié).
+- **Vent** : champ **à divergence nulle** *v* = ∇×**B** (**B** = bruit gaussien lissé) + vent moyen horizontal selon la direction méto.
+
+Ce n’est **pas** un substitut à un maillage CFD urbain, mais une base reproductible pour valider le code d’entraînement et le FNO avec des champs lisses et des contraintes PDE cohérentes avec la loss PINN.
+
+Génération puis entraînement (grille **puissances de 2** pour compatibilité FFT / GPU) :
+
+```bash
+# Depuis la racine du monorepo (venv ou environnement avec torch, h5py, scipy, pyyaml)
+PYTHONPATH=. python -m training.src.data.generate_synthetic_dataset \
+  --output training/data/synthetic_cfd_local.h5 \
+  --meta-yaml training/configs/local_synthetic.yaml \
+  --n-train 24 --n-val 6 --seed 42
+
+PYTHONPATH=. python -m training.src.model.train --config training/configs/local_synthetic.yaml
+```
+
+Les sorties (`training/data/*.h5`, `training/checkpoints/`, `training/runs/`) sont listées dans `.gitignore` et ne doivent pas être versionnées.
+
+**Note technique** : la couche spectrale du FNO n’est pas compatible avec l’AMP fp16 sur CUDA ; `use_amp` est **désactivé** par défaut dans `train.py` (voir `training.use_amp` dans le YAML si un jour le modèle le supporte).
+
 ## Docker
 
 Requires an NVIDIA GPU and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html).

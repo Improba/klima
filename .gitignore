@@ -41,3 +41,8 @@ npm-debug.log*
 __pycache__/
 *.py[cod]
 .venv/
+
+# === Training artefacts (local / synthetic runs — do not commit) ===
+training/data/*.h5
+training/checkpoints/
+training/runs/
