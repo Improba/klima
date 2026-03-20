@@ -57,3 +57,12 @@ From the monorepo root:
 ```bash
 PYTHONPATH=. python -m training.src.model.mock_onnx --output model.onnx --norm-output norm_params.json
 ```
+
+**Intégration backend** (`back/models/`) : générer le graphe mock, puis copier les stats de normalisation **réelles** de l’entraînement (le FNO entier ne s’exporte pas en ONNX à cause de `fft_rfftn`) :
+
+```bash
+PYTHONPATH=. python -m training.src.model.mock_onnx --output back/models/klima.onnx --norm-output /tmp/mock.json
+cp training/checkpoints/norm_params.json back/models/norm_params.json
+```
+
+Voir `back/models/README.md` pour le détail et `training/src/model/export_onnx.py` (`dynamo=False` ; échec attendu sur le vrai FNO tant que l’export FFT n’existe pas).

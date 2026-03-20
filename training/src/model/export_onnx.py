@@ -48,15 +48,20 @@ def export_to_onnx(
         "output": {0: "batch_size", 2: "nx", 3: "ny", 4: "nz"},
     }
 
-    torch.onnx.export(
-        model,
-        dummy_input,
-        output_path,
-        opset_version=opset_version,
-        input_names=["input"],
-        output_names=["output"],
-        dynamic_axes=dynamic_axes,
-    )
+    # torch>=2.4 defaults to Dynamo export, which fails on FNO (FFT + symbolic sizes).
+    _export_kw: Dict[str, Any] = {
+        "model": model,
+        "args": dummy_input,
+        "f": output_path,
+        "opset_version": opset_version,
+        "input_names": ["input"],
+        "output_names": ["output"],
+        "dynamic_axes": dynamic_axes,
+    }
+    try:
+        torch.onnx.export(**_export_kw, dynamo=False)  # type: ignore[call-arg]
+    except TypeError:
+        torch.onnx.export(**_export_kw)
 
     if norm_params_path and norm_params:
         serialisable = {}

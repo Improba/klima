@@ -28,7 +28,7 @@ Docker must be started manually in the Cloud VM since there's no systemd. After 
 ### Key caveats
 
 - **Backend Dockerfile**: `back/docker/Dockerfile.dev` uses `rust:trixie` (Debian 13, glibc 2.40) because the `ort` crate's pre-built ONNX Runtime binary requires glibc >= 2.38. The original `rust:bookworm` (glibc 2.36) causes linker errors.
-- **ONNX model not required**: The backend gracefully falls back to mock data when no `.onnx` model is loaded. The simulate endpoint returns mock results.
+- **ONNX model**: Optional. If `KLIMA_MODEL_PATH` and `KLIMA_NORM_PATH` are set (see `back/docker/docker-compose.dev.yml`, defaulting to `/app/models/klima.onnx` and `norm_params.json` under `back/models/` on the host), the API loads ONNX Runtime. The Local FNO uses `fft_rfftn`, which PyTorch’s ONNX exporter does not support; use a mock ONNX (same I/O) plus real `norm_params.json` from training for integration, or run inference in PyTorch for trained weights. Without a loadable model, the simulate endpoint returns mock results.
 - **Cesium Ion token**: Optional. The map uses OpenStreetMap imagery on a dark globe without a starfield. Pass `CESIUM_ION_TOKEN` (or `VITE_CESIUM_ION_TOKEN` for the frontend build) to enable Cesium OSM 3D Buildings via Ion: `CESIUM_ION_TOKEN=xxx ./scripts/run.sh`
 - **Frontend proxy**: The frontend dev server proxies `/api/*` to `http://klima-back:3000` via Docker networking. For local (non-Docker) testing, use `VITE_API_BASE_URL=http://localhost:3000`.
 

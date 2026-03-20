@@ -36,6 +36,8 @@ npm-debug.log*
 
 # === ONNX models (large files) ===
 *.onnx
+back/models/norm_params.json
+back/models/*.onnx.data
 
 # === Python (training scripts if any) ===
 __pycache__/

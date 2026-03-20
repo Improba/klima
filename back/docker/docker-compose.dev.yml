@@ -15,6 +15,8 @@ services:
     environment:
       - RUST_LOG=klima_api=debug,tower_http=debug
       - DATABASE_URL=postgres://klima:klima@klima-db:5432/klima
+      - KLIMA_MODEL_PATH=/app/models/klima.onnx
+      - KLIMA_NORM_PATH=/app/models/norm_params.json
     depends_on:
       klima-db:
         condition: service_healthy
