@@ -5,7 +5,7 @@
 - [Docker](https://docs.docker.com/get-docker/) >= 24.0
 - [Docker Compose](https://docs.docker.com/compose/install/) >= 2.20
 
-Aucune installation locale de Rust, Node.js ou autre n'est nécessaire. Tout tourne dans Docker.
+Aucune installation locale de Rust, Node.js ou autre n'est nécessaire pour **l’application** (backend + frontend + PostgreSQL) : tout tourne dans Docker via `./scripts/run.sh`.
 
 ## Démarrage rapide
 
@@ -83,3 +83,13 @@ L’imagery de base vient d’OpenStreetMap (pas besoin de token). Pour activer 
 ```bash
 CESIUM_ION_TOKEN=your_token_here ./scripts/run.sh
 ```
+
+## Entraînement du modèle (optionnel)
+
+Hors du script `run.sh` : stack séparée **Docker Compose**, projet `klima-training`, conteneur `klima-training`. Nécessite un **GPU NVIDIA** et le [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html).
+
+```bash
+cd training/docker && docker compose up --build
+```
+
+Le dépôt entier est monté dans le conteneur (`PYTHONPATH` = racine du monorepo, répertoire de travail = `training/`). Détail des prérequis données, export ONNX et dépannage `runtime: nvidia` : [training/README.md](../training/README.md).

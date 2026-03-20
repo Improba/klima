@@ -79,6 +79,9 @@ docker exec -it klima-front bash   # npm, quasar, etc.
 ./scripts/run.sh down -v      # Arrêter + volumes
 ./scripts/run.sh logs         # Logs
 ./scripts/run.sh restart      # Redémarrer
+
+# Entraînement ML (optionnel, GPU — stack Compose séparée, voir training/README.md)
+# cd training/docker && docker compose up --build
 ```
 
 ---

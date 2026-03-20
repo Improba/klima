@@ -4,9 +4,9 @@ The mock model has the correct I/O signature (15-channel input, 4-channel
 output, variable spatial dims) but uses trivial Conv3d layers instead of a
 full FNO, enabling fast inference during integration testing.
 
-Usage::
+Usage (from monorepo root, ``PYTHONPATH=.``)::
 
-    python -m training.src.model.mock_onnx --output model.onnx --norm-output norm_params.json
+    PYTHONPATH=. python -m training.src.model.mock_onnx --output model.onnx --norm-output norm_params.json
 """
 
 from __future__ import annotations

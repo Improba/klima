@@ -23,7 +23,8 @@
 │  training/  →  Python (PyTorch, NVIDIA Modulus, neuraloperator)      │
 │                Local-FNO + PINN  →  export .onnx                    │
 │                                                                     │
-│  scripts/run.sh → lance les containers Docker                        │
+│  scripts/run.sh → lance back + front + DB (projet Compose `klima`)   │
+│  training/docker → entraînement GPU optionnel (projet `klima-training`) │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -71,6 +72,14 @@ klima/
 │       ├── Dockerfile.dev
 │       └── docker-compose.dev.yml
 │
+├── training/                   # Pipeline ML (optionnel, GPU)
+│   ├── configs/
+│   ├── docker/
+│   │   ├── Dockerfile          # PyTorch CUDA
+│   │   └── docker-compose.yml  # Projet Compose `klima-training`
+│   ├── src/
+│   └── README.md
+│
 ├── docs/                       # Documentation
 │   ├── specification.md        # Spec (FNO, PINN, GeoJSON-to-Tensor)
 │   ├── architecture.md         # Ce fichier
@@ -79,7 +88,7 @@ klima/
 │       └── implementation-plan.md
 │
 ├── scripts/
-│   └── run.sh                  # Lance l'env de dev Docker
+│   └── run.sh                  # Lance l'env de dev Docker (back + front + DB)
 │
 ├── .gitignore
 └── README.md
@@ -138,9 +147,17 @@ klima/
 
 ## Communication inter-services (Docker)
 
+### Application (développement)
+
 - 3 containers : `klima-back` (Rust), `klima-front` (Node), `klima-db` (PostgreSQL)
 - Réseau Docker `klima-net` partagé
 - Le backend se connecte à PostgreSQL via `DATABASE_URL=postgres://klima:klima@klima-db:5432/klima`
 - Le frontend proxy les appels `/api/*` vers `http://klima-back:3000`
 - Chaque container applicatif monte le code source du host via un volume partagé
 - PostgreSQL persiste ses données dans un volume Docker nommé `pgdata`
+
+### Entraînement (optionnel)
+
+- Fichier `training/docker/docker-compose.yml`, projet Compose **`klima-training`** (distinct de `klima` pour éviter les collisions avec la stack dev).
+- Conteneur **`klima-training`** : montage de la **racine du monorepo** dans `/app`, `PYTHONPATH=/app`, `working_dir=/app/training` pour les chemins du config YAML.
+- Pas de réseau partagé avec `klima-net` par défaut ; l’API consomme un modèle ONNX via variables d’environnement (`KLIMA_MODEL_PATH`, `KLIMA_NORM_PATH`) côté backend si tu les configures.

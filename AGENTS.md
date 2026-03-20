@@ -12,7 +12,7 @@ Klima is a Docker-based monorepo with three runtime services:
 | Frontend | `klima-front` | 9000 | Vue 3 / Quasar / CesiumJS |
 | Database | `klima-db` | 5432 | PostgreSQL 16 |
 
-An optional `klima-training` service (Python/PyTorch) exists for ML model training but requires an NVIDIA GPU and is not needed for dev.
+An optional **training** stack (Python/PyTorch, CUDA) is **not** started by `run.sh`. Use `training/docker/docker-compose.yml` (Compose project `klima-training`, container `klima-training`). It mounts the **monorepo root** at `/app`, sets `PYTHONPATH=/app`, and `working_dir=/app/training`. Requires an NVIDIA GPU and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html). See `training/README.md` for local vs Docker commands and `runtime: nvidia` troubleshooting.
 
 ### Starting the dev environment
 

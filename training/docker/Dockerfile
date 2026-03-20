@@ -7,4 +7,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-ENV PYTHONPATH=/app
+# Imports use package `training.src` (monorepo layout). docker-compose.yml mounts the repo root and sets PYTHONPATH=/app.
