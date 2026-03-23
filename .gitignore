@@ -8,6 +8,7 @@ back/.sqlx/
 front/node_modules/
 front/dist/
 front/.quasar/
+front/quasar.config.ts.temporary.compiled.*.mjs
 front/src-capacitor/
 front/src-cordova/
 

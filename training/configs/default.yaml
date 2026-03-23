@@ -27,6 +27,7 @@ loss:
   lambda_wind: 1.0
   lambda_div: 0.01
   lambda_noslip: 10.0
+  lambda_impermeability: 0.15
   lambda_diffusion: 0.1
 
 data:

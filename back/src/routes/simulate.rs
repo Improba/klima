@@ -12,9 +12,19 @@ use uuid::Uuid;
 use crate::db;
 use crate::error::AppError;
 use crate::inference::fno_client;
-use crate::inference::postprocessor::{self, SimulationResult};
+use crate::inference::osm_buildings;
+use crate::inference::overlay_geo;
+use crate::inference::postprocessor::{self, SimulationResult, WindFieldSample};
 use crate::inference::preprocessor::{self, GeometryBlock};
 use crate::AppState;
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct OsmBuildingBbox {
+    pub west: f64,
+    pub south: f64,
+    pub east: f64,
+    pub north: f64,
+}
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct SimulateRequest {
@@ -25,6 +35,9 @@ pub struct SimulateRequest {
     pub sun_elevation: f64,
     pub t_ambient: Option<f64>,
     pub geometry: Vec<GeometryBlock>,
+    /// Si présent : récupération Overpass `building=*` dans la bbox puis rasterisation en voxels « batiment ».
+    #[serde(default)]
+    pub osm_building_bbox: Option<OsmBuildingBbox>,
 }
 
 async fn simulate(
@@ -34,11 +47,12 @@ async fn simulate(
     let t_ambient = req.t_ambient.unwrap_or(20.0);
 
     tracing::info!(
-        "Simulation request: wind={} m/s, dir={}°, sun={}°, {} blocks",
+        "Simulation request: wind={} m/s, dir={}°, sun={}°, {} blocks, osm_bbox={}",
         req.wind_speed,
         req.wind_direction,
         req.sun_elevation,
-        req.geometry.len()
+        req.geometry.len(),
+        req.osm_building_bbox.is_some()
     );
 
     let cache_key = simulation_cache_key(&req);
@@ -47,14 +61,44 @@ async fn simulate(
         return Ok(Json(cached));
     }
 
+    let osm_ways_storage = if let Some(ref bb) = req.osm_building_bbox {
+        match osm_buildings::fetch_building_ways(
+            &state.http_client,
+            bb.west,
+            bb.south,
+            bb.east,
+            bb.north,
+        )
+        .await
+        {
+            Ok(v) if !v.is_empty() => {
+                tracing::info!("OSM buildings: {} ways in bbox", v.len());
+                Some(v)
+            }
+            Ok(_) => {
+                tracing::debug!("OSM buildings: empty result for bbox");
+                None
+            }
+            Err(e) => {
+                tracing::warn!("OSM Overpass failed (simulation without OSM solids): {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let osm_slice = osm_ways_storage.as_deref();
+
     let tensor = preprocessor::preprocess_geometry(
         &req.geometry,
         req.wind_speed,
         req.wind_direction,
         req.sun_elevation,
         t_ambient,
+        osm_slice,
     );
     let tensor_dyn: ArrayD<f32> = tensor.into_dyn();
+    let occupancy = postprocessor::pack_occupancy(&tensor_dyn, [8, 8, 4]);
 
     let t_infer = Instant::now();
     let mut output: Option<ArrayD<f32>> = None;
@@ -77,17 +121,23 @@ async fn simulate(
         o
     } else if state.onnx.is_loaded() {
         model_loaded = true;
-        state.onnx.predict(tensor_dyn).await?
+        state.onnx.predict(tensor_dyn.clone()).await?
     } else {
         tracing::debug!("No FNO URL success and no ONNX — returning mock data");
-        let mock = generate_mock_result(&req.geometry, t_ambient);
+        let mock = generate_mock_result(&req, &tensor_dyn, t_ambient, occupancy.clone());
         state.cache.insert(&cache_key, mock.clone());
         return Ok(Json(mock));
     };
 
     let inference_time_ms = t_infer.elapsed().as_millis() as u64;
 
-    let result = postprocessor::postprocess(&output, t_ambient, inference_time_ms, model_loaded);
+    let result = postprocessor::postprocess(
+        &output,
+        occupancy,
+        t_ambient,
+        inference_time_ms,
+        model_loaded,
+    );
 
     state.cache.insert(&cache_key, result.clone());
 
@@ -133,6 +183,12 @@ fn simulation_cache_key(req: &SimulateRequest) -> String {
     cache_push_f64(&mut buf, req.wind_direction);
     cache_push_f64(&mut buf, req.sun_elevation);
     cache_push_f64(&mut buf, t_ambient);
+    if let Some(ref bb) = req.osm_building_bbox {
+        cache_push_f64(&mut buf, bb.west);
+        cache_push_f64(&mut buf, bb.south);
+        cache_push_f64(&mut buf, bb.east);
+        cache_push_f64(&mut buf, bb.north);
+    }
     for &i in &order {
         let b = &req.geometry[i];
         cache_push_f64(&mut buf, b.x);
@@ -166,25 +222,72 @@ fn wgs84_to_overlay_grid(lon: f64, lat: f64) -> (f64, f64) {
     (gx, gy)
 }
 
-fn mock_wind_samples(center_x: f64, center_y: f64) -> Vec<postprocessor::WindFieldSample> {
-    let mut out = Vec::with_capacity(9);
-    for dx in -1..=1 {
-        for dy in -1..=1 {
-            out.push(postprocessor::WindFieldSample {
-                x: center_x + f64::from(dx),
-                y: center_y + f64::from(dy),
-                z: 0.0,
-                vx: 1.0,
-                vy: 0.35,
-                vz: 0.0,
-            });
-        }
+/// Vent mock : même sous-échantillonnage que `postprocessor::postprocess`, vitesse nulle dans les solides.
+/// Composantes alignées sur `training/src/data/synthetic_physics.py` et `encoding.encode_input` :
+/// `vx = V·sin(dir)`, `vy = V·cos(dir)` avec `dir` en degrés, convention identique au canal 11–12 du tenseur.
+fn mock_wind_field_from_occupancy(
+    input: &ArrayD<f32>,
+    wind_speed: f64,
+    wind_direction_deg: f64,
+) -> Vec<WindFieldSample> {
+    let shape = input.shape();
+    if shape.len() != 5 {
+        return vec![];
     }
-    out
+    let nx = shape[2];
+    let ny = shape[3];
+    let nz = shape[4];
+    if nx == 0 || ny == 0 || nz == 0 {
+        return vec![];
+    }
+
+    let (target_wx, target_wy, target_wz) = (64usize, 64usize, 16usize);
+    let step_x = (nx / target_wx.min(nx)).max(1);
+    let step_y = (ny / target_wy.min(ny)).max(1);
+    let step_z = (nz / target_wz.min(nz)).max(1);
+
+    let rad = wind_direction_deg.to_radians();
+    let base_vx = wind_speed * rad.sin();
+    let base_vy = wind_speed * rad.cos();
+
+    let mut wind_field = Vec::new();
+    let mut ix = 0usize;
+    while ix < nx {
+        let mut iy = 0usize;
+        while iy < ny {
+            let mut iz = 0usize;
+            while iz < nz {
+                let solid = input[[0, 0, ix, iy, iz]] > 0.5;
+                let (vx, vy, vz) = if solid {
+                    (0.0, 0.0, 0.0)
+                } else {
+                    (base_vx, base_vy, 0.0)
+                };
+                wind_field.push(WindFieldSample {
+                    x: ix as f64,
+                    y: iy as f64,
+                    z: iz as f64,
+                    vx,
+                    vy,
+                    vz,
+                });
+                iz += step_z;
+            }
+            iy += step_y;
+        }
+        ix += step_x;
+    }
+    wind_field
 }
 
-fn generate_mock_result(geometry: &[GeometryBlock], t_ambient: f64) -> SimulationResult {
-    let surface_temperatures: Vec<_> = geometry
+fn generate_mock_result(
+    req: &SimulateRequest,
+    tensor: &ArrayD<f32>,
+    t_ambient: f64,
+    occupancy: Option<postprocessor::OccupancyGrid>,
+) -> SimulationResult {
+    let surface_temperatures: Vec<_> = req
+        .geometry
         .iter()
         .map(|b| {
             let (gx, gy) = wgs84_to_overlay_grid(b.x, b.y);
@@ -197,30 +300,48 @@ fn generate_mock_result(geometry: &[GeometryBlock], t_ambient: f64) -> Simulatio
         })
         .collect();
 
-    let (cx, cy) = if surface_temperatures.is_empty() {
-        (0.0, 0.0)
+    let wind_field = mock_wind_field_from_occupancy(tensor, req.wind_speed, req.wind_direction);
+
+    let shape = tensor.shape();
+    let (nx, ny, nz) = if shape.len() == 5 {
+        (shape[2], shape[3], shape[4])
     } else {
-        let sx: f64 = surface_temperatures.iter().map(|s| s.lon).sum();
-        let sy: f64 = surface_temperatures.iter().map(|s| s.lat).sum();
-        let n = surface_temperatures.len() as f64;
-        (sx / n, sy / n)
+        (256, 256, 64)
     };
-    let wind_field = mock_wind_samples(cx, cy);
+
+    let wind_speed_range = if wind_field.is_empty() {
+        [0.0, 0.0]
+    } else {
+        let mut min_ws = f64::MAX;
+        let mut max_ws = f64::MIN;
+        for w in &wind_field {
+            let speed = (w.vx * w.vx + w.vy * w.vy + w.vz * w.vz).sqrt();
+            if speed < min_ws {
+                min_ws = speed;
+            }
+            if speed > max_ws {
+                max_ws = speed;
+            }
+        }
+        [min_ws, max_ws]
+    };
 
     SimulationResult {
         metadata: postprocessor::ResultMetadata {
-            grid_resolution: [256, 256, 64],
-            wind_subsample: [64, 64, 16],
+            grid_resolution: [nx, ny, nz],
+            wind_subsample: [64usize.min(nx), 64usize.min(ny), 16usize.min(nz)],
             num_surface_points: surface_temperatures.len(),
             num_wind_samples: wind_field.len(),
             inference_time_ms: 0,
             model_loaded: false,
             t_ambient,
             delta_t_range: [2.0, 2.0],
-            wind_speed_range: [1.0, 1.0],
+            wind_speed_range,
+            z_meters_per_voxel: overlay_geo::Z_METERS_PER_VOXEL,
         },
         surface_temperatures,
         wind_field,
+        occupancy,
     }
 }
 
@@ -252,6 +373,7 @@ mod tests {
             sun_elevation: 45.0,
             t_ambient: Some(19.0),
             geometry: vec![sample_block(1.0, 2.0, 0.0)],
+            osm_building_bbox: None,
         };
         let mut b = a.clone();
         b.project_id = None;
@@ -269,6 +391,7 @@ mod tests {
             sun_elevation: 10.0,
             t_ambient: None,
             geometry: vec![sample_block(0.0, 1.0, 0.0), sample_block(1.0, 0.0, 0.0)],
+            osm_building_bbox: None,
         };
         let mut b = a.clone();
         b.geometry.reverse();

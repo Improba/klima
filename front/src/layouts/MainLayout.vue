@@ -85,6 +85,29 @@
 
         <q-item class="q-px-md">
           <q-item-section>
+            <q-toggle
+              v-model="simStore.includeOsmBuildings"
+              color="cyan"
+              label="Bâtiments OSM (3D + inférence)"
+            />
+            <q-item-label caption class="q-mt-xs text-grey-5">
+              <template v-if="simStore.includeOsmBuildings && simStore.osmBbox">
+                Emprise inférence (contour cyan sur la carte) : {{ bboxSummary(simStore.osmBbox) }} —
+                le tileset 3D Cesium Ion est affiché ou masqué avec ce même interrupteur ; l’API envoie
+                en plus une requête Overpass sur cette zone pour le tenseur.
+              </template>
+              <template v-else-if="simStore.includeOsmBuildings">
+                Déplacez ou zoomez la carte pour définir l’emprise (vue actuelle).
+              </template>
+              <template v-else>
+                Désactivé : la requête n’envoie pas de bbox Overpass.
+              </template>
+            </q-item-label>
+          </q-item-section>
+        </q-item>
+
+        <q-item class="q-px-md">
+          <q-item-section>
             <q-btn
               color="cyan"
               label="Lancer la simulation"
@@ -131,6 +154,7 @@ import { ref, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useQuasar } from 'quasar'
 import { useSimulationStore } from 'src/stores/simulation'
+import type { OsmBuildingBbox } from 'src/types'
 
 const $q = useQuasar()
 const route = useRoute()
@@ -144,6 +168,11 @@ const isProjectPage = computed(() => {
 
 function toggleLeftDrawer() {
   leftDrawerOpen.value = !leftDrawerOpen.value
+}
+
+function bboxSummary(b: OsmBuildingBbox) {
+  const fmt = (x: number) => x.toFixed(4)
+  return `${fmt(b.west)}, ${fmt(b.south)} → ${fmt(b.east)}, ${fmt(b.north)}`
 }
 
 async function runSimulation() {

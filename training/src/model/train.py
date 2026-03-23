@@ -82,6 +82,7 @@ def train(config: Dict[str, Any]) -> None:
         lambda_wind=lc["lambda_wind"],
         lambda_div=lc["lambda_div"],
         lambda_noslip=lc["lambda_noslip"],
+        lambda_impermeability=lc.get("lambda_impermeability", 0.0),
         lambda_diffusion=lc["lambda_diffusion"],
         dx=config["domain"]["dx"],
     )

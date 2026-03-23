@@ -1,0 +1,11 @@
+# Contexte d’image = répertoire training/ (voir training/docker/docker-compose.yml build.context)
+data/
+checkpoints/
+runs/
+.git/
+.venv/
+venv/
+**/__pycache__/
+**/*.pyc
+**/*.h5
+.dockerignore

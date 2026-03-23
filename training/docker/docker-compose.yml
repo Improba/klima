@@ -1,30 +1,22 @@
-# GPU: NVIDIA Container Toolkit + driver. Uses `runtime: nvidia` (legacy layout, same
-# idea as separate nvidia overlays). If Docker errors with "unknown runtime: nvidia",
-# remove the `runtime:` line — `deploy.resources` alone is enough on many recent installs.
 name: klima-training
+
+# Build partagé (une seule image) : entraînement GPU + smoke-test torch sans GPU obligatoire.
+x-training-build: &training-build
+  context: ..
+  dockerfile: docker/Dockerfile
 
 services:
   klima-training:
     container_name: klima-training
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-    runtime: nvidia
-    # Monorepo root on PYTHONPATH so `training.src.model` resolves; cwd = training/ for configs/data paths
+    build: *training-build
+    gpus: all
     working_dir: /app/training
     volumes:
       - ../../:/app
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu, compute, utility]
     environment:
       - PYTHONPATH=/app
       - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - NVIDIA_DRIVER_CAPABILITIES=all
     shm_size: "8g"
     command:
       - python
@@ -32,3 +24,14 @@ services:
       - training.src.model.train
       - --config
       - configs/default.yaml
+
+  # Smoke-test PyTorch + loss PINN (pas besoin de GPU ; même image que l’entraînement).
+  klima-training-verify:
+    container_name: klima-training-verify
+    build: *training-build
+    working_dir: /app
+    volumes:
+      - ../../:/app
+    environment:
+      - PYTHONPATH=/app
+    command: [python, training/docker/verify_training_env.py]

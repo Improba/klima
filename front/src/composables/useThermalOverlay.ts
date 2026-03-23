@@ -43,7 +43,7 @@ export function useThermalOverlay() {
       b = 0
     }
 
-    return new Color(r, g, b, 0.6)
+    return new Color(r, g, b, 0.48)
   }
 
   function applyOverlay(viewer: Viewer, temperatures: SurfaceTemperature[]) {
@@ -81,7 +81,7 @@ export function useThermalOverlay() {
       const r = Math.round(color.red * 255)
       const g = Math.round(color.green * 255)
       const b = Math.round(color.blue * 255)
-      ctx.fillStyle = `rgba(${r},${g},${b},0.7)`
+      ctx.fillStyle = `rgba(${r},${g},${b},0.52)`
       const px = t.lon - minGridX
       const py = maxGridY - t.lat // flip Y so north is up
       ctx.fillRect(px, py, 1, 1)

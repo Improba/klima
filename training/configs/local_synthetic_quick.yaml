@@ -1,0 +1,45 @@
+# Entraînement court sur données synthétiques (même domaine que local_synthetic.yaml).
+# Générer d’abord le HDF5 (README training), puis :
+#   PYTHONPATH=. python -m training.src.model.train --config training/configs/local_synthetic_quick.yaml
+
+domain:
+  nx: 64
+  ny: 64
+  nz: 32
+  dx: 2.0
+
+model:
+  type: local_fno
+  modes: [12, 12, 6]
+  width: 48
+  num_layers: 3
+  in_channels: 15
+  out_channels: 4
+
+training:
+  batch_size: 2
+  epochs: 10
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  gradient_clip: 1.0
+  early_stopping_patience: 4
+  num_workers: 0
+  pin_memory: false
+
+loss:
+  lambda_temp: 1.0
+  lambda_wind: 1.0
+  lambda_div: 0.01
+  lambda_noslip: 10.0
+  lambda_impermeability: 0.15
+  lambda_diffusion: 0.1
+
+data:
+  hdf5_path: training/data/synthetic_cfd_local.h5
+  normalize: true
+  augment: true
+
+logging:
+  tensorboard_dir: training/runs/
+  checkpoint_dir: training/checkpoints/
+  log_every: 1

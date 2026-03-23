@@ -71,7 +71,7 @@ npm install <package>    # Ajouter un package
 
 | Variable | Description | Où la définir |
 |----------|-------------|---------------|
-| `CESIUM_ION_TOKEN` | Token Cesium Ion (optionnel) pour les bâtiments 3D Cesium OSM | Fichier **`.env` à la racine** du repo (chargé par `./scripts/run.sh`) ou `export` dans le shell |
+| `CESIUM_ION_TOKEN` | **Seul** jeton Cesium à définir (optionnel) — bâtiments 3D Ion | **`.env` à la racine** (chargé par `run.sh`) ; ne pas dupliquer en `VITE_CESIUM_ION_TOKEN` (c’est le compose qui l’injecte au front) |
 | `KLIMA_FNO_URL` | URL du sidecar PyTorch FNO | Vide par défaut (`./scripts/run.sh`) pour un dev fluide ; défini automatiquement avec `./scripts/run.sh dev-infer` |
 | `RUST_LOG`, `KLIMA_MODEL_PATH`, `KLIMA_NORM_PATH`, `KLIMA_CACHE_SIZE` | Backend | Surcharges via `back/docker/.env` (voir `back/docker/.env.example`) ou shell avant `docker compose` |
 
@@ -101,7 +101,7 @@ Hors du script `run.sh` : stack séparée **Docker Compose**, projet `klima-trai
 cd training/docker && docker compose up --build
 ```
 
-Le dépôt entier est monté dans le conteneur (`PYTHONPATH` = racine du monorepo, répertoire de travail = `training/`). Détail des prérequis données, export ONNX et dépannage `runtime: nvidia` : [training/README.md](../training/README.md).
+Le dépôt entier est monté dans le conteneur (`PYTHONPATH` = racine du monorepo, répertoire de travail = `training/`). Détail des prérequis données, export ONNX et GPU Docker : [training/README.md](../training/README.md).
 
 Pour un **jeu de données local sans CFD** (Laplace + vent divergence nulle, voir doc du module), suivre la section *Données synthétiques* du même README ; les fichiers `.h5`, checkpoints et runs restent ignorés par Git.
 

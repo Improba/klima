@@ -3,6 +3,9 @@
     <div ref="canvasArea" class="canvas-area">
       <div ref="cesiumContainer" class="canvas-element cesium-container" />
     </div>
+    <div v-if="ionOsmBuildingsHint" class="map-hint text-caption">
+      {{ ionOsmBuildingsHint }}
+    </div>
   </div>
 </template>
 
@@ -12,8 +15,10 @@ import {
   Viewer,
   Cartesian2,
   Cartesian3,
+  Cesium3DTileset,
   Color,
   createOsmBuildingsAsync,
+  createWorldTerrainAsync,
   type Entity,
   Math as CesiumMath,
   defined,
@@ -22,10 +27,21 @@ import {
   ScreenSpaceEventType,
   UrlTemplateImageryProvider,
 } from 'cesium'
-import type { GeometryBlock, SimulationResult } from 'src/types'
+import type { GeometryBlock, SimulationResult, WindParticlesContext } from 'src/types'
 import { useThermalOverlay } from 'src/composables/useThermalOverlay'
 import { useWindParticles } from 'src/composables/useWindParticles'
 import { gridToGeo } from 'src/utils/overlayGrid'
+import { useSimulationStore } from 'src/stores/simulation'
+
+defineOptions({ name: 'CesiumViewer' })
+
+function windParticlesContextFromResult(r: SimulationResult): WindParticlesContext {
+  return {
+    occupancy: r.occupancy ?? undefined,
+    gridResolution: r.metadata.grid_resolution,
+    zMetersPerVoxel: r.metadata.z_meters_per_voxel,
+  }
+}
 
 const DEFAULT_LON = 2.3522
 const DEFAULT_LAT = 48.8566
@@ -153,12 +169,74 @@ const emit = defineEmits<{
 
 const cesiumContainer = ref<HTMLElement>()
 const canvasArea = ref<HTMLElement>()
+/** Message si le tileset Ion « OSM Buildings » n’a pas pu être chargé (jeton / asset 96188). */
+const ionOsmBuildingsHint = ref('')
 let viewer: Viewer | null = null
+let ionOsmTileset: Cesium3DTileset | null = null
 let handler: ScreenSpaceEventHandler | null = null
 let resizeObserver: ResizeObserver | null = null
+/** Rectangle cyan : emprise WGS84 envoyée au backend (Overpass ≠ tileset Ion, mais même zone). */
+let inferenceBboxEntity: Entity | undefined
 
 const { applyOverlay, clearOverlay } = useThermalOverlay()
 const { startAnimation, stopAnimation } = useWindParticles()
+const simStore = useSimulationStore()
+
+/** Emprise WGS84 pour Overpass : borne la taille pour éviter les timeouts. */
+function clampOsmBbox(west: number, south: number, east: number, north: number) {
+  const maxSpan = 0.22
+  const cx = (west + east) / 2
+  const cy = (south + north) / 2
+  let lonSpan = east - west
+  let latSpan = north - south
+  if (lonSpan > maxSpan) {
+    lonSpan = maxSpan
+    west = cx - lonSpan / 2
+    east = cx + lonSpan / 2
+  }
+  if (latSpan > maxSpan) {
+    latSpan = maxSpan
+    south = cy - latSpan / 2
+    north = cy + latSpan / 2
+  }
+  return { west, south, east, north }
+}
+
+function syncOsmBboxFromView() {
+  if (!viewer) return
+  const rect = viewer.camera.computeViewRectangle(viewer.scene.globe.ellipsoid)
+  if (!defined(rect)) return
+  let west = CesiumMath.toDegrees(rect.west)
+  let south = CesiumMath.toDegrees(rect.south)
+  let east = CesiumMath.toDegrees(rect.east)
+  let north = CesiumMath.toDegrees(rect.north)
+  if (![west, south, east, north].every(Number.isFinite)) return
+  if (east <= west || north <= south) return
+  if (east - west > 350) return
+  const b = clampOsmBbox(west, south, east, north)
+  simStore.setOsmBbox(b)
+  syncInferenceBboxOverlay()
+}
+
+function syncInferenceBboxOverlay() {
+  if (!viewer) return
+  if (inferenceBboxEntity) {
+    viewer.entities.remove(inferenceBboxEntity)
+    inferenceBboxEntity = undefined
+  }
+  if (!simStore.includeOsmBuildings || !simStore.osmBbox) return
+  const { west, south, east, north } = simStore.osmBbox
+  inferenceBboxEntity = viewer.entities.add({
+    rectangle: {
+      coordinates: Rectangle.fromDegrees(west, south, east, north),
+      material: Color.CYAN.withAlpha(0.06),
+      outline: true,
+      outlineColor: Color.CYAN.withAlpha(0.85),
+      outlineWidth: 2,
+      height: 0,
+    },
+  })
+}
 
 onMounted(async () => {
   if (!cesiumContainer.value) return
@@ -194,6 +272,19 @@ onMounted(async () => {
 
   viewer.scene.globe.enableLighting = props.sunElevation > 0
 
+  // Sans MNT, l’ellipsoïde est « plat » alors que les bâtiments Ion ont des hauteurs réelles → effet « flottants ».
+  try {
+    viewer.terrainProvider = await createWorldTerrainAsync({
+      requestVertexNormals: true,
+    })
+    viewer.scene.globe.depthTestAgainstTerrain = true
+  } catch (e) {
+    console.warn(
+      'Cesium World Terrain indisponible (jeton Ion ou asset 1) — bâtiments peuvent sembler en l’air :',
+      e,
+    )
+  }
+
   try {
     const osm = new UrlTemplateImageryProvider({
       url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -209,11 +300,29 @@ onMounted(async () => {
     console.warn('Failed to load OSM imagery', e)
   }
 
+  ionOsmBuildingsHint.value = ''
+  ionOsmTileset = null
+  const token = import.meta.env.VITE_CESIUM_ION_TOKEN?.trim() ?? ''
+  if (!token) {
+    ionOsmBuildingsHint.value =
+      'Jeton Cesium Ion manquant : ajoutez CESIUM_ION_TOKEN dans la racine .env (voir AGENTS.md) pour les bâtiments 3D.'
+  }
   try {
     const osmBuildings = await createOsmBuildingsAsync()
     viewer.scene.primitives.add(osmBuildings)
+    ionOsmTileset = osmBuildings
+    osmBuildings.show = simStore.includeOsmBuildings
+    ionOsmBuildingsHint.value = ''
   } catch (err) {
-    console.warn('OSM Buildings unavailable:', err)
+    ionOsmTileset = null
+    if (!ionOsmBuildingsHint.value) {
+      ionOsmBuildingsHint.value =
+        'Bâtiments 3D Ion indisponibles (vérifiez le jeton et l’accès à l’asset OSM Buildings dans Ion).'
+    }
+    console.warn(
+      'Cesium Ion OSM Buildings : échec (souvent 404 si le jeton ne voit pas l’asset 96188 — Ion → Asset Depot).',
+      err,
+    )
   }
 
   if (props.simulationResult) {
@@ -236,6 +345,9 @@ onMounted(async () => {
   syncGeometryMarkers(viewer, props.geometry)
 
   setupClickHandler()
+
+  viewer.camera.moveEnd.addEventListener(syncOsmBboxFromView)
+  syncOsmBboxFromView()
 
   if (canvasArea.value) {
     resizeObserver = new ResizeObserver(() => {
@@ -281,13 +393,22 @@ watch(
     if (!viewer) return
     if (result) {
       applyOverlay(viewer, result.surface_temperatures)
-      startAnimation(viewer, result.wind_field)
+      startAnimation(viewer, result.wind_field, windParticlesContextFromResult(result))
       focusCameraOnPoints(viewer, geoPointsFromSimulation(result), { duration: 1.35 })
     } else {
       clearOverlay(viewer)
       stopAnimation(viewer)
     }
   },
+)
+
+watch(
+  () => [simStore.osmBbox, simStore.includeOsmBuildings] as const,
+  () => {
+    syncInferenceBboxOverlay()
+    if (ionOsmTileset) ionOsmTileset.show = simStore.includeOsmBuildings
+  },
+  { deep: true },
 )
 
 watch(
@@ -315,6 +436,11 @@ onBeforeUnmount(() => {
   resizeObserver = null
   stopAnimation(viewer ?? undefined)
   if (viewer) {
+    viewer.camera.moveEnd.removeEventListener(syncOsmBboxFromView)
+    if (inferenceBboxEntity) {
+      viewer.entities.remove(inferenceBboxEntity)
+      inferenceBboxEntity = undefined
+    }
     clearOverlay(viewer)
     syncGeometryMarkers(viewer, undefined)
   }
@@ -322,10 +448,26 @@ onBeforeUnmount(() => {
   handler = null
   viewer?.destroy()
   viewer = null
+  ionOsmTileset = null
 })
 </script>
 
 <style scoped>
+.map-hint {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 10px;
+  z-index: 2;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(12, 18, 24, 0.82);
+  color: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(0, 232, 255, 0.35);
+  pointer-events: none;
+  max-width: 42rem;
+}
+
 .viewer-root {
   position: absolute;
   inset: 0;

@@ -26,6 +26,13 @@ export interface GeometryDiff {
   modifications: GeometryBlock[]
 }
 
+export interface OsmBuildingBbox {
+  west: number
+  south: number
+  east: number
+  north: number
+}
+
 export interface SimulateRequest {
   wind_speed: number
   wind_direction: number
@@ -34,6 +41,8 @@ export interface SimulateRequest {
   geometry: GeometryBlock[]
   project_id?: string
   scenario_id?: string
+  /** Bbox WGS84 de la vue carte → backend Overpass + voxels bâtiment */
+  osm_building_bbox?: OsmBuildingBbox
 }
 
 export interface SurfaceTemperature {
@@ -52,6 +61,14 @@ export interface WindFieldSample {
   vz: number
 }
 
+/** Grille d’occupancy sous-échantillonnée (alignée sur le canal 0 du tenseur d’inférence). */
+export interface OccupancyGrid {
+  stride: [number, number, number]
+  dims: [number, number, number]
+  /** Row-major : ix + dims[0] * (iy + dims[1] * iz) ; 0 = air, 1 = solide */
+  cells: number[]
+}
+
 export interface SimulationResult {
   surface_temperatures: SurfaceTemperature[]
   wind_field: WindFieldSample[]
@@ -65,7 +82,17 @@ export interface SimulationResult {
     t_ambient: number
     delta_t_range: [number, number]
     wind_speed_range: [number, number]
+    /** m par couche Z (souvent 2), aligné backend `Z_METERS_PER_VOXEL` */
+    z_meters_per_voxel?: number
   }
+  occupancy?: OccupancyGrid | null
+}
+
+/** Contexte pour l’advection des particules (occupancy + résolution grille). */
+export interface WindParticlesContext {
+  occupancy?: OccupancyGrid | null
+  gridResolution: [number, number, number]
+  zMetersPerVoxel?: number
 }
 
 export interface Simulation {

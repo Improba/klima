@@ -5,7 +5,7 @@ import {
   PointPrimitiveCollection,
   Math as CesiumMath,
 } from 'cesium'
-import type { WindFieldSample } from 'src/types'
+import type { WindFieldSample, WindParticlesContext } from 'src/types'
 import {
   gridToGeo,
   OVERLAY_CELL_DEG,
@@ -13,8 +13,13 @@ import {
   OVERLAY_ORIGIN_LON,
 } from 'src/utils/overlayGrid'
 
-/** Altitude d'affichage (m) par couche z du tenseur — le backend envoie des indices, pas des mètres. */
-const ALT_METERS_PER_GRID_Z = 8
+/** Défaut aligné sur `back/src/inference/overlay_geo.rs` (`Z_METERS_PER_VOXEL`). */
+const DEFAULT_Z_METERS_PER_VOXEL = 2
+
+/**
+ * Particules : advection dans le champ vent API + blocage horizontal si `occupancy`
+ * (même géométrie voxel que l’inférence, pas les tuiles Cesium).
+ */
 
 interface Particle {
   position: Cartesian3
@@ -162,29 +167,94 @@ function interpolateWindFast(
   return [wx / totalWeight, wy / totalWeight, wz / totalWeight]
 }
 
+function cellSolid(
+  gx: number,
+  gy: number,
+  gz: number,
+  gridResolution: [number, number, number],
+  occ?: WindParticlesContext['occupancy'],
+): boolean {
+  if (!occ || occ.cells.length === 0) return false
+  const [nx, ny, nz] = gridResolution
+  if (nx < 1 || ny < 1 || nz < 1) return false
+  const [dx, dy, dz] = occ.dims
+  const [sx, sy, sz] = occ.stride
+  if (dx < 1 || dy < 1 || dz < 1 || sx < 1 || sy < 1 || sz < 1) return false
+  const expected = dx * dy * dz
+  if (occ.cells.length !== expected) return false
+
+  const ix = Math.max(0, Math.min(nx - 1, Math.floor(gx)))
+  const iy = Math.max(0, Math.min(ny - 1, Math.floor(gy)))
+  const iz = Math.max(0, Math.min(nz - 1, Math.floor(gz)))
+  const ox = Math.min(dx - 1, Math.floor(ix / sx))
+  const oy = Math.min(dy - 1, Math.floor(iy / sy))
+  const oz = Math.min(dz - 1, Math.floor(iz / sz))
+  const idx = ox + dx * (oy + dy * oz)
+  if (idx < 0 || idx >= occ.cells.length) return false
+  return occ.cells[idx] === 1
+}
+
 const PARTICLE_COUNT = 800
 const BASE_MAX_AGE = 120
-const SPEED_SCALE = 0.00001
+/** Conversion m → degrés latitude (WGS84, approximation sphère). */
+const METERS_PER_DEG_LAT = 111_320
+/**
+ * La grille d’overlay fait ~500 m ; à l’échelle réelle (m/s → °/s) le déplacement par image serait
+ * invisible. On compresse le temps pour la lisibilité tout en conservant la direction (vx, vy).
+ */
+const WIND_TIME_COMPRESSION = 120
 
 export function useWindParticles() {
   let animationFrame: number | null = null
   let particles: Particle[] = []
   let pointCollection: PointPrimitiveCollection | null = null
+  let lastFrameMs = 0
 
-  function spawnParticle(windField: WindFieldSample[]): Particle {
-    const sample = windField[Math.floor(Math.random() * windField.length)]
-    /** Jitter en indices grille (~fraction de cellule), pas en ° — sinon on sort du champ vent (mock 3×3). */
+  function spawnParticle(
+    windField: WindFieldSample[],
+    pctx: WindParticlesContext,
+  ): Particle {
+    if (windField.length === 0) {
+      throw new Error('useWindParticles: empty windField')
+    }
+    const zmpv = pctx.zMetersPerVoxel ?? DEFAULT_Z_METERS_PER_VOXEL
+    const gridRes = pctx.gridResolution
+    const pick = () => windField[Math.floor(Math.random() * windField.length)]
+
+    for (let attempt = 0; attempt < 48; attempt++) {
+      const sample = pick()
+      const jx = (Math.random() - 0.5) * 0.45
+      const jy = (Math.random() - 0.5) * 0.45
+      const gx = sample.x + jx
+      const gy = sample.y + jy
+      const gz = sample.z
+      if (cellSolid(gx, gy, gz, gridRes, pctx.occupancy)) {
+        continue
+      }
+      const geo = gridToGeo(gx, gy)
+      const alt =
+        sample.z * zmpv + (Math.random() - 0.5) * zmpv
+      return {
+        position: Cartesian3.fromDegrees(
+          geo.lon,
+          geo.lat,
+          Math.max(0, alt),
+        ),
+        velocity: [sample.vx, sample.vy, sample.vz],
+        age: 0,
+        maxAge: BASE_MAX_AGE + Math.random() * 60,
+        gridZ: sample.z,
+      }
+    }
+
+    const sample = pick()
     const jx = (Math.random() - 0.5) * 0.45
     const jy = (Math.random() - 0.5) * 0.45
     const geo = gridToGeo(sample.x + jx, sample.y + jy)
     const alt =
-      sample.z * ALT_METERS_PER_GRID_Z + (Math.random() - 0.5) * ALT_METERS_PER_GRID_Z
+      sample.z * zmpv + (Math.random() - 0.5) * zmpv
     return {
-      position: Cartesian3.fromDegrees(
-        geo.lon,
-        geo.lat,
-        Math.max(0, alt),
-      ),
+      position: Cartesian3.fromDegrees(geo.lon, geo.lat, Math.max(0, alt)),
       velocity: [sample.vx, sample.vy, sample.vz],
       age: 0,
       maxAge: BASE_MAX_AGE + Math.random() * 60,
@@ -199,29 +269,46 @@ export function useWindParticles() {
     }
   }
 
-  function startAnimation(viewer: Viewer, windField: WindFieldSample[]) {
+  function startAnimation(
+    viewer: Viewer,
+    windField: WindFieldSample[],
+    ctx?: WindParticlesContext,
+  ) {
     stopAnimation(viewer)
 
     if (windField.length === 0) return
 
     const grid = buildWindGrid(windField)
+    const zmpv = ctx?.zMetersPerVoxel ?? DEFAULT_Z_METERS_PER_VOXEL
+    const gridRes: [number, number, number] =
+      ctx?.gridResolution ?? [256, 256, 64]
+    const pctx: WindParticlesContext = {
+      occupancy: ctx?.occupancy,
+      gridResolution: gridRes,
+      zMetersPerVoxel: zmpv,
+    }
 
     pointCollection = new PointPrimitiveCollection()
     viewer.scene.primitives.add(pointCollection)
 
     particles = []
     for (let i = 0; i < PARTICLE_COUNT; i++) {
-      const p = spawnParticle(windField)
+      const p = spawnParticle(windField, pctx)
       particles.push(p)
       pointCollection.add({
         position: p.position,
         pixelSize: 3,
         color: Color.WHITE.withAlpha(0.7),
+        disableDepthTestDistance: 0,
       })
     }
 
-    function animate() {
+    function animate(frameTimeMs: number) {
       if (!pointCollection) return
+
+      if (lastFrameMs <= 0) lastFrameMs = frameTimeMs
+      const dt = Math.min(0.05, Math.max(0, (frameTimeMs - lastFrameMs) / 1000))
+      lastFrameMs = frameTimeMs
 
       const ellipsoid = viewer.scene.globe.ellipsoid
 
@@ -230,7 +317,7 @@ export function useWindParticles() {
         p.age++
 
         if (p.age >= p.maxAge) {
-          const newP = spawnParticle(windField)
+          const newP = spawnParticle(windField, pctx)
           particles[i] = newP
           const pp = pointCollection.get(i)
           pp.position = newP.position
@@ -248,12 +335,18 @@ export function useWindParticles() {
         const [vx, vy, vz] = interpolateWindFast(gx, gy, gz, grid)
         p.velocity = [vx, vy, vz]
 
-        const newLon = lonDeg + vx * SPEED_SCALE
-        const newLat = latDeg + vy * SPEED_SCALE
-        // Hauteur suivant la couche du modèle (évite alt/2 confondu avec l'indice z).
-        const newAlt = Math.max(0, p.gridZ * ALT_METERS_PER_GRID_Z)
+        const latRad = CesiumMath.toRadians(latDeg)
+        const mPerDegLon = METERS_PER_DEG_LAT * Math.max(0.2, Math.cos(latRad))
+        const adv = WIND_TIME_COMPRESSION * dt
+        const tryLon = lonDeg + (vx * adv) / mPerDegLon
+        const tryLat = latDeg + (vy * adv) / METERS_PER_DEG_LAT
+        const { gx: ngx, gy: ngy } = geoToGrid(tryLon, tryLat)
+        const blocked = cellSolid(ngx, ngy, gz, gridRes, pctx.occupancy)
+        const useLon = blocked ? lonDeg : tryLon
+        const useLat = blocked ? latDeg : tryLat
 
-        p.position = Cartesian3.fromDegrees(newLon, newLat, newAlt)
+        const newAlt = Math.max(0, p.gridZ * zmpv)
+        p.position = Cartesian3.fromDegrees(useLon, useLat, newAlt)
 
         const speed = Math.sqrt(vx * vx + vy * vy + vz * vz)
         const fade = 1 - p.age / p.maxAge
@@ -267,17 +360,17 @@ export function useWindParticles() {
         pp.pixelSize = 2 + speed * 0.3
       }
 
-      // Cesium n’affiche pas les mises à jour de primitives tant que la scène n’est pas invalidée
-      // (souvent avec requestRenderMode actif).
       viewer.scene.requestRender()
 
       animationFrame = requestAnimationFrame(animate)
     }
 
+    lastFrameMs = 0
     animationFrame = requestAnimationFrame(animate)
   }
 
   function stopAnimation(viewer?: Viewer) {
+    lastFrameMs = 0
     if (animationFrame !== null) {
       cancelAnimationFrame(animationFrame)
       animationFrame = null

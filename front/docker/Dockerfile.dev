@@ -1,9 +1,15 @@
 FROM node:22-bookworm
 
+# Dev server needs devDependencies (@quasar/app-vite, etc.). Host NODE_ENV can leak into
+# Compose; without this, `npm install` may omit them and Quasar/Vite break.
+ENV NODE_ENV=development
+
 RUN npm install -g @quasar/cli
 
 WORKDIR /app
 
 EXPOSE 9000
 
-CMD ["sh", "-c", "npm install && npx quasar dev --hostname 0.0.0.0"]
+# Vite n’expose que les variables VITE_* au client ; le .env racine définit CESIUM_ION_TOKEN.
+# Compose ne doit pas interpoler ${CESIUM_ION_TOKEN} côté hôte (souvent vide) — on aligne ici.
+CMD ["sh", "-c", "export VITE_CESIUM_ION_TOKEN=\"${VITE_CESIUM_ION_TOKEN:-$CESIUM_ION_TOKEN}\" && npm ci && npx quasar dev --hostname 0.0.0.0"]

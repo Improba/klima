@@ -1,4 +1,6 @@
 pub mod fno_client;
+pub mod overlay_geo;
+pub mod osm_buildings;
 pub mod postprocessor;
 pub mod preprocessor;
 

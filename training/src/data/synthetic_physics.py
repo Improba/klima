@@ -9,8 +9,8 @@ We build supervision targets from:
 
 2. **Velocity** — a **divergence-free** field :math:`\\mathbf{v} = \\nabla \\times \\mathbf{B}`
    with smoothed Gaussian random :math:`\\mathbf{B}`, plus a horizontal mean wind
-   aligned with the meteorological wind direction. Thus :math:`\\nabla\\cdot\\mathbf{v}=0`
-   in the continuum limit (discretisation introduces small residuals).
+   aligned with the meteorological wind direction, then **clipping** of components
+   that would cross an air→solid voxel face (discrete impermeability).
 
 The 15-channel input layout matches ``training.src.model.encoding.encode_input``.
 Outputs are :math:`\\Delta T = T - T_\\mathrm{amb}` and :math:`(v_x, v_y, v_z)`.
@@ -158,6 +158,37 @@ def divergence_free_wind(
     return vx.astype(np.float32), vy.astype(np.float32), vz.astype(np.float32)
 
 
+def clip_inflow_into_solids(
+    vx: np.ndarray,
+    vy: np.ndarray,
+    vz: np.ndarray,
+    occ: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Annule les composantes de vitesse qui traversent une face air→solide (discrétisation voxel)."""
+    sol = occ > 0.5
+    air = ~sol
+    vx_o = vx.copy()
+    vy_o = vy.copy()
+    vz_o = vz.copy()
+
+    m = air[:-1, :, :] & sol[1:, :, :]
+    vx_o[:-1, :, :][m] = np.minimum(vx_o[:-1, :, :][m], 0.0)
+    m = air[1:, :, :] & sol[:-1, :, :]
+    vx_o[1:, :, :][m] = np.maximum(vx_o[1:, :, :][m], 0.0)
+
+    m = air[:, :-1, :] & sol[:, 1:, :]
+    vy_o[:, :-1, :][m] = np.minimum(vy_o[:, :-1, :][m], 0.0)
+    m = air[:, 1:, :] & sol[:, :-1, :]
+    vy_o[:, 1:, :][m] = np.maximum(vy_o[:, 1:, :][m], 0.0)
+
+    m = air[:, :, :-1] & sol[:, :, 1:]
+    vz_o[:, :, :-1][m] = np.minimum(vz_o[:, :, :-1][m], 0.0)
+    m = air[:, :, 1:] & sol[:, :, :-1]
+    vz_o[:, :, 1:][m] = np.maximum(vz_o[:, :, 1:][m], 0.0)
+
+    return vx_o, vy_o, vz_o
+
+
 def physical_props_random(
     occ: np.ndarray,
     surf: np.ndarray,
@@ -213,6 +244,7 @@ def synthesize_sample(
     sun_el = float(rng.uniform(15.0, 75.0))
 
     vx, vy, vz = divergence_free_wind(nx, ny, nz, dx, air, wind_speed, wind_dir, rng)
+    vx, vy, vz = clip_inflow_into_solids(vx, vy, vz, occ)
 
     props = physical_props_random(occ, surf, rng)
     inp_t = encode_input(

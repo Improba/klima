@@ -91,6 +91,44 @@ def laplacian_3d(field: torch.Tensor, dx: float) -> torch.Tensor:
     return lap
 
 
+def impermeability_loss(
+    vx: torch.Tensor,
+    vy: torch.Tensor,
+    vz: torch.Tensor,
+    mask_air: torch.Tensor,
+    mask_solid: torch.Tensor,
+) -> torch.Tensor:
+    """Pénalise les composantes de vitesse qui, depuis l’air, pointent vers un voxel solide voisin
+    (proxy d’imperméabilité discrète sur les faces air–solide).
+    """
+    air = (mask_air > 0.5).float()
+    sol = (mask_solid > 0.5).float()
+    acc = vx.new_tensor(0.0)
+    wsum = vx.new_tensor(0.0)
+
+    def add_face(v_comp: torch.Tensor, air_slice, sol_slice, flip: bool) -> None:
+        nonlocal acc, wsum
+        w = air_slice * sol_slice
+        if flip:
+            t = torch.relu(-v_comp) ** 2
+        else:
+            t = torch.relu(v_comp) ** 2
+        acc = acc + (t * w).sum()
+        wsum = wsum + w.sum()
+
+    # ±x
+    add_face(vx[:, :, :-1, :, :], air[:, :, :-1, :, :], sol[:, :, 1:, :, :], False)
+    add_face(vx[:, :, 1:, :, :], air[:, :, 1:, :, :], sol[:, :, :-1, :, :], True)
+    # ±y
+    add_face(vy[:, :, :, :-1, :], air[:, :, :, :-1, :], sol[:, :, :, 1:, :], False)
+    add_face(vy[:, :, :, 1:, :], air[:, :, :, 1:, :], sol[:, :, :, :-1, :], True)
+    # ±z
+    add_face(vz[:, :, :, :, :-1], air[:, :, :, :, :-1], sol[:, :, :, :, 1:], False)
+    add_face(vz[:, :, :, :, 1:], air[:, :, :, :, 1:], sol[:, :, :, :, :-1], True)
+
+    return acc / wsum.clamp(min=1.0)
+
+
 class PINNLoss(nn.Module):
     """Physics-informed loss combining data-fitting and PDE residuals.
 
@@ -104,6 +142,8 @@ class PINNLoss(nn.Module):
         Weight for divergence-free penalty.
     lambda_noslip : float
         Weight for no-slip boundary condition.
+    lambda_impermeability : float
+        Weight for discrete air→solid face impermeability (predicted field only).
     lambda_diffusion : float
         Weight for heat diffusion residual.
     dx : float
@@ -116,6 +156,7 @@ class PINNLoss(nn.Module):
         lambda_wind: float = 1.0,
         lambda_div: float = 0.01,
         lambda_noslip: float = 10.0,
+        lambda_impermeability: float = 0.0,
         lambda_diffusion: float = 0.1,
         dx: float = 2.0,
     ) -> None:
@@ -124,6 +165,7 @@ class PINNLoss(nn.Module):
         self.lambda_wind = lambda_wind
         self.lambda_div = lambda_div
         self.lambda_noslip = lambda_noslip
+        self.lambda_impermeability = lambda_impermeability
         self.lambda_diffusion = lambda_diffusion
         self.dx = dx
 
@@ -156,7 +198,7 @@ class PINNLoss(nn.Module):
         Returns
         -------
         dict
-            Keys: ``total``, ``temp``, ``wind``, ``div``, ``noslip``, ``diffusion``.
+            Keys: ``total``, ``temp``, ``wind``, ``div``, ``noslip``, ``imperm``, ``diffusion``.
         """
         pred_temp = pred[:, 0:1]
         pred_vx = pred[:, 1:2]
@@ -190,6 +232,9 @@ class PINNLoss(nn.Module):
             (pred_vx ** 2 + pred_vy ** 2 + pred_vz ** 2) * mask_solid
         ).sum() / n_solid
 
+        # Term 4b: predicted velocity — no inflow into solid faces from air
+        loss_imperm = impermeability_loss(pred_vx, pred_vy, pred_vz, mask_air, mask_solid)
+
         # Term 5: Steady-state heat equation residual: α∇²T ≈ 0 at surfaces
         lap_t = laplacian_3d(pred_temp, self.dx)
         diffusion_residual = alpha_field * lap_t
@@ -201,6 +246,7 @@ class PINNLoss(nn.Module):
             + self.lambda_wind * loss_wind
             + self.lambda_div * loss_div
             + self.lambda_noslip * loss_noslip
+            + self.lambda_impermeability * loss_imperm
             + self.lambda_diffusion * loss_diffusion
         )
 
@@ -210,5 +256,6 @@ class PINNLoss(nn.Module):
             "wind": loss_wind,
             "div": loss_div,
             "noslip": loss_noslip,
+            "imperm": loss_imperm,
             "diffusion": loss_diffusion,
         }

@@ -1,6 +1,9 @@
 use ndarray::Array5;
 use serde::{Deserialize, Serialize};
 
+use crate::inference::osm_buildings::OsmBuildingWay;
+use crate::inference::overlay_geo;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeometryBlock {
     pub x: f64,
@@ -19,7 +22,9 @@ impl GeometryBlock {
 
 const SURFACE_TYPES: [&str; 6] = ["bitume", "herbe", "eau", "gravier", "vegetation", "batiment"];
 
-/// Build a 15-channel 3-D voxel tensor from geometry blocks and weather conditions.
+/// Build a 15-channel 3-D voxel tensor from weather, optional OSM footprints, then user blocks.
+///
+/// `geometry[].x/y` = **lon / lat** WGS84 ; `z` = altitude (m). Aligné avec `overlay_geo` et le front.
 ///
 /// Output shape: `[1, 15, NX, NY, NZ]`
 ///
@@ -40,8 +45,23 @@ pub fn preprocess_geometry(
     wind_dir: f64,
     sun_elevation: f64,
     t_ambient: f64,
+    osm_ways: Option<&[OsmBuildingWay]>,
 ) -> Array5<f32> {
-    let (nx, ny, nz) = (256, 256, 64);
+    let mut tensor = build_base_tensor(wind_speed, wind_dir, sun_elevation, t_ambient);
+    if let Some(ways) = osm_ways {
+        crate::inference::osm_buildings::rasterize_ways_into_tensor(&mut tensor, ways);
+    }
+    apply_geometry_blocks(&mut tensor, geometry);
+    tensor
+}
+
+pub fn build_base_tensor(
+    wind_speed: f64,
+    wind_dir: f64,
+    sun_elevation: f64,
+    t_ambient: f64,
+) -> Array5<f32> {
+    let (nx, ny, nz) = (overlay_geo::GRID_NX, overlay_geo::GRID_NY, overlay_geo::GRID_NZ);
     let nch = 15;
     let mut tensor = Array5::<f32>::zeros((1, nch, nx, ny, nz));
 
@@ -52,44 +72,33 @@ pub fn preprocess_geometry(
     let sun = sun_elevation as f32;
     let ta = t_ambient as f32;
 
-    {
-        let mut ch10 = tensor.slice_mut(ndarray::s![0, 10, .., .., ..]);
-        ch10.fill(ws);
-    }
-    {
-        let mut ch11 = tensor.slice_mut(ndarray::s![0, 11, .., .., ..]);
-        ch11.fill(sin_dir);
-    }
-    {
-        let mut ch12 = tensor.slice_mut(ndarray::s![0, 12, .., .., ..]);
-        ch12.fill(cos_dir);
-    }
-    {
-        let mut ch13 = tensor.slice_mut(ndarray::s![0, 13, .., .., ..]);
-        ch13.fill(sun);
-    }
-    {
-        let mut ch14 = tensor.slice_mut(ndarray::s![0, 14, .., .., ..]);
-        ch14.fill(ta);
-    }
-
-    for block in geometry {
-        let gx = (block.x as i64).clamp(0, (nx as i64) - 1) as usize;
-        let gy = (block.y as i64).clamp(0, (ny as i64) - 1) as usize;
-        let gz = (block.z as i64).clamp(0, (nz as i64) - 1) as usize;
-
-        tensor[[0, 0, gx, gy, gz]] = 1.0;
-
-        let type_idx = surface_type_index(&block.surface_type);
-        tensor[[0, 1 + type_idx, gx, gy, gz]] = 1.0;
-
-        let (albedo, emissivity, roughness) = surface_physical_props(&block.surface_type);
-        tensor[[0, 7, gx, gy, gz]] = albedo;
-        tensor[[0, 8, gx, gy, gz]] = emissivity;
-        tensor[[0, 9, gx, gy, gz]] = roughness;
-    }
+    tensor.slice_mut(ndarray::s![0, 10, .., .., ..]).fill(ws);
+    tensor.slice_mut(ndarray::s![0, 11, .., .., ..]).fill(sin_dir);
+    tensor.slice_mut(ndarray::s![0, 12, .., .., ..]).fill(cos_dir);
+    tensor.slice_mut(ndarray::s![0, 13, .., .., ..]).fill(sun);
+    tensor.slice_mut(ndarray::s![0, 14, .., .., ..]).fill(ta);
 
     tensor
+}
+
+pub fn apply_geometry_blocks(tensor: &mut Array5<f32>, geometry: &[GeometryBlock]) {
+    for block in geometry {
+        let (ix, iy) = overlay_geo::grid_ix_iy(block.x, block.y);
+        let iz = overlay_geo::grid_iz(block.z);
+
+        tensor[[0, 0, ix, iy, iz]] = 1.0;
+
+        let type_idx = surface_type_index(&block.surface_type);
+        for c in 1..=6 {
+            tensor[[0, c, ix, iy, iz]] = 0.0;
+        }
+        tensor[[0, 1 + type_idx, ix, iy, iz]] = 1.0;
+
+        let (albedo, emissivity, roughness) = surface_physical_props(&block.surface_type);
+        tensor[[0, 7, ix, iy, iz]] = albedo;
+        tensor[[0, 8, ix, iy, iz]] = emissivity;
+        tensor[[0, 9, ix, iy, iz]] = roughness;
+    }
 }
 
 fn surface_type_index(surface_type: &str) -> usize {
@@ -128,7 +137,7 @@ mod tests {
 
     #[test]
     fn empty_geometry_fills_broadcast_channels() {
-        let t = preprocess_geometry(&[], 5.0, 90.0, 30.0, 18.0);
+        let t = preprocess_geometry(&[], 5.0, 90.0, 30.0, 18.0, None);
         assert_eq!(t.shape(), &[1, 15, 256, 256, 64]);
         let wind_rad = 90f64.to_radians();
         assert!((t[[0, 10, 10, 10, 10]] - 5.0).abs() < 1e-6);
@@ -139,14 +148,14 @@ mod tests {
     }
 
     #[test]
-    fn block_sets_occupancy_and_surface_one_hot() {
+    fn block_sets_occupancy_and_surface_one_hot_at_paris_origin_cell() {
         let g = [GeometryBlock {
-            x: 0.0,
-            y: 0.0,
+            x: overlay_geo::OVERLAY_ORIGIN_LON,
+            y: overlay_geo::OVERLAY_ORIGIN_LAT,
             z: 0.0,
             surface_type: "bitume".into(),
         }];
-        let t = preprocess_geometry(&g, 1.0, 0.0, 0.0, 20.0);
+        let t = preprocess_geometry(&g, 1.0, 0.0, 0.0, 20.0, None);
         assert_eq!(t[[0, 0, 0, 0, 0]], 1.0);
         assert_eq!(t[[0, 1, 0, 0, 0]], 1.0);
         for c in 2..=6 {
